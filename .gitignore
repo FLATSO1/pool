@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 環境変数・秘密情報（APIキー等は絶対にコミットしない）
+.env
+*.local
+
+# アプリの実行時データ（ペーパートレード口座状態・ログ等）
+data/state/
+data/cache/
+logs/
+*.log
