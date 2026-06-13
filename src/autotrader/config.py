@@ -97,6 +97,8 @@ class Secrets:
 @dataclass
 class Config:
     universe: list[str] = field(default_factory=list)
+    universe_source: str = "manual"  # "manual"(下のリスト) | "file"(CSVを読む)
+    universe_file: str = "data/universe/nikkei225.csv"
     fundamental: FundamentalConfig = field(default_factory=FundamentalConfig)
     technical: TechnicalConfig = field(default_factory=TechnicalConfig)
     sentiment: SentimentConfig = field(default_factory=SentimentConfig)
@@ -115,6 +117,8 @@ class Config:
 
         return cls(
             universe=list(raw.get("universe", [])),
+            universe_source=raw.get("universe_source", "manual"),
+            universe_file=raw.get("universe_file", cls.universe_file),
             fundamental=_build(FundamentalConfig, raw.get("fundamental")),
             technical=_build(TechnicalConfig, raw.get("technical")),
             sentiment=_build(SentimentConfig, raw.get("sentiment")),

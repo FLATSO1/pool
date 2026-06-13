@@ -24,6 +24,7 @@
 
 ## 特徴
 
+- **ユニバース** — 手書きリスト or CSV（日経225など）を全銘柄スキャンして選定
 - **ファンダメンタル選定** — PER / ROE / 利益率 / 売上成長 / D/E をスコア化し足切り
 - **テクニカル解析** — SMAクロス・MACD・RSI を加重統合（TA-Lib不要、pandasのみ）
 - **センチメント** — Claude API（`claude-opus-4-8`）でニュース/SNS見出しを解析。
@@ -122,6 +123,30 @@ autotrader kabus-check 7203.T   # 銘柄を指定
 
 > まずは検証環境（`KABUS_BASE_URL=http://localhost:18081/kabusapi`）で
 > 動作を確認してから本番（18080）に切り替えるのが安全です。
+
+## ユニバース（銘柄選定の範囲）
+
+「どの銘柄を検討対象にするか」は `config.yaml` で切り替えます。
+
+```yaml
+universe_source: "file"                       # "manual" | "file"
+universe_file: "data/universe/nikkei225.csv"  # file時に読むCSV（code列）
+```
+
+- **`manual`** … `universe:` に手書きした銘柄だけを対象
+- **`file`** … CSV（`code` 列）の銘柄を対象。**日経225を全銘柄スキャン**したい場合はこちら
+
+同梱の `data/universe/nikkei225.csv` には日経225の**主要構成銘柄**を収録しています。
+**全225銘柄**に拡張するには、日経公式やJPXからダウンロードした構成銘柄CSVを
+変換ツールに通してください（Webスクレイピングせず手元のCSVを変換するだけ）:
+
+```bash
+python tools/build_universe.py 公式構成銘柄.csv -o data/universe/nikkei225.csv
+```
+
+> ⚠️ **センチメントは銘柄選定には使いません。** 選定はファンダメンタル（割安・高収益・
+> 健全性）で行い、センチメントはあくまで「いつ買うか」のタイミング補正に使います。
+> ニュースの“話題性”で銘柄を拾うと、急騰後や仕手銘柄を掴むリスクが高いためです。
 
 ## 戦略ロジックの概要
 

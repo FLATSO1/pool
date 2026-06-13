@@ -1,7 +1,13 @@
 # autotrader 設定ファイルのサンプル。
 # `cp config.example.yaml config.yaml` してから値を調整してください。
 
-# 監視ユニバース（東証銘柄。yfinance形式の ".T" サフィックス）
+# 監視ユニバースの供給方法:
+#   "manual" = 下の universe リストを使う
+#   "file"   = universe_file のCSV（code列）を読む（例: 日経225を全銘柄スキャン）
+universe_source: "file"
+universe_file: "data/universe/nikkei225.csv"
+
+# universe_source="manual" のときに使う手書きリスト（".T"サフィックス）
 universe:
   - "7203.T"   # トヨタ自動車
   - "6758.T"   # ソニーグループ

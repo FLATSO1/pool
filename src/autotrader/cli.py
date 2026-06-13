@@ -71,14 +71,18 @@ def main(argv: list[str] | None = None) -> int:
 def _cmd_screen(cfg: Config) -> int:
     from .analysis.fundamental import score_fundamentals
     from .data.fundamentals import fetch_fundamentals
+    from .data.universe import load_universe
 
-    if not cfg.universe:
-        print("ユニバースが空です。config.yaml の universe を設定してください。")
+    universe = load_universe(cfg)
+    if not universe:
+        print(
+            "ユニバースが空です。config.yaml の universe か universe_file を設定してください。"
+        )
         return 1
 
-    print(f"ファンダメンタル選定（{len(cfg.universe)}銘柄）...\n")
+    print(f"ファンダメンタル選定（{len(universe)}銘柄をスキャン）...\n")
     rows = []
-    for t in cfg.universe:
+    for t in universe:
         f = fetch_fundamentals(t)
         s = score_fundamentals(f, cfg.fundamental)
         rows.append(s)
@@ -89,6 +93,13 @@ def _cmd_screen(cfg: Config) -> int:
     for r in rows:
         mark = "通過" if r.passed else "除外"
         print(f"{r.ticker:<10}{r.score:>8.2f}{mark:>8}  {', '.join(r.reasons)}")
+
+    passed = [r for r in rows if r.passed]
+    print("-" * 70)
+    print(f"通過: {len(passed)} / {len(rows)} 銘柄")
+    if passed:
+        top = ", ".join(r.ticker for r in passed[:10])
+        print(f"上位通過銘柄: {top}")
     return 0
 
 
@@ -126,18 +137,20 @@ def _cmd_backtest(cfg: Config) -> int:
     from .backtest.backtester import Backtester
     from .data.fundamentals import fetch_fundamentals
     from .data.market_data import fetch_ohlcv
+    from .data.universe import load_universe
 
-    if not cfg.universe:
+    universe = load_universe(cfg)
+    if not universe:
         print("ユニバースが空です。")
         return 1
 
     print(
         f"バックテスト {cfg.backtest.start} 〜 {cfg.backtest.end} "
-        f"（{len(cfg.universe)}銘柄）...\n"
+        f"（{len(universe)}銘柄）...\n"
     )
     ohlcv: dict = {}
     passed: set[str] = set()
-    for t in cfg.universe:
+    for t in universe:
         df = fetch_ohlcv(t, start=cfg.backtest.start, end=cfg.backtest.end)
         if not df.empty:
             ohlcv[t] = df
@@ -159,6 +172,7 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
     from .data.fundamentals import fetch_fundamentals
     from .data.market_data import fetch_ohlcv, latest_price
     from .data.news import fetch_headlines
+    from .data.universe import load_universe
     from .portfolio import can_open_new, check_risk_exits
     from .strategy.engine import StrategyEngine
 
@@ -176,7 +190,7 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
     # 価格を集める
     ohlcv_map: dict = {}
     prices: dict[str, float] = {}
-    for t in cfg.universe:
+    for t in load_universe(cfg):
         df = fetch_ohlcv(t, period="1y")
         if df.empty:
             continue
