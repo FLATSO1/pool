@@ -41,6 +41,13 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("account", help="ペーパー口座状態を表示")
 
+    p_kc = sub.add_parser(
+        "kabus-check", help="kabuステーションAPIへの接続を確認（発注しない）"
+    )
+    p_kc.add_argument(
+        "ticker", nargs="?", help='現在値を取得する銘柄（省略時はユニバース先頭）'
+    )
+
     args = parser.parse_args(argv)
     cfg = Config.load(args.config)
 
@@ -54,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_run(cfg, dry_run=args.dry_run)
     if args.command == "account":
         return _cmd_account(cfg)
+    if args.command == "kabus-check":
+        return _cmd_kabus_check(cfg, args.ticker)
     return 1
 
 
@@ -227,6 +236,60 @@ def _cmd_account(cfg: Config) -> int:
 
     broker = PaperBroker(cash=cfg.trading.cash)
     _print_account(broker, {})
+    return 0
+
+
+def _cmd_kabus_check(cfg: Config, ticker: str | None) -> int:
+    """kabuステーションAPIへの接続を確認する（認証・現在値・余力。発注はしない）。"""
+    import os
+
+    from .broker.kabus import KabusBroker
+
+    pw = cfg.secrets.kabus_api_password
+    if not pw:
+        print("✗ KABUS_API_PASSWORD が未設定です。.env を確認してください。")
+        return 1
+
+    print(f"kabuステーションAPI 接続チェック: {cfg.secrets.kabus_base_url}\n")
+    broker = KabusBroker(
+        api_password=pw,
+        base_url=cfg.secrets.kabus_base_url,
+        trade_password=os.getenv("KABUS_TRADE_PASSWORD"),
+        exchange=cfg.trading.exchange,
+    )
+
+    # 1) 認証
+    try:
+        broker.connect()
+        print("✓ 認証成功（トークン取得）")
+    except Exception as exc:  # noqa: BLE001 - 接続診断のため広く捕捉
+        print(f"✗ 認証失敗: {exc}")
+        print("  → kabuステーションが起動中か、APIパスワードが正しいか確認してください。")
+        return 1
+
+    # 2) 現在値
+    symbol = ticker or (cfg.universe[0] if cfg.universe else "7203.T")
+    px = broker.quote(symbol)
+    if px is not None:
+        print(f"✓ 現在値取得: {symbol} = {px:,}円")
+    else:
+        print(f"△ 現在値を取得できませんでした: {symbol}（板情報の購読登録が必要な場合あり）")
+
+    # 3) 余力・ポジション
+    cash = broker.cash()
+    print(f"✓ 買付余力: {cash:,.0f}円")
+    positions = broker.positions()
+    print(f"✓ 保有銘柄: {len(positions)}件")
+    for t, pos in positions.items():
+        print(f"    {t}: {pos.quantity}株 @ {pos.avg_price:,.0f}")
+
+    # 取引パスワードの有無（発注に必須）
+    if os.getenv("KABUS_TRADE_PASSWORD"):
+        print("✓ 取引パスワード(KABUS_TRADE_PASSWORD): 設定済み")
+    else:
+        print("△ 取引パスワード(KABUS_TRADE_PASSWORD)が未設定です（発注時に必要）")
+
+    print("\n接続チェック完了。発注は行っていません。")
     return 0
 
 

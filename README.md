@@ -2,7 +2,13 @@
 
 ファンダメンタルで銘柄を選定し、テクニカルで売買タイミングを判定、
 ニュース/SNSのセンチメントでマクロ視点を反映して、ペーパートレード
-または実弾（auカブコム証券 kabuステーションAPI）で発注する Python アプリです。
+または実弾（**三菱UFJ eスマート証券**＝旧auカブコム証券の kabuステーションAPI）
+で発注する Python アプリです。
+
+> SBI証券など個人向けの自動発注APIが無い証券会社では、本アプリは
+> 「銘柄選定〜売買シグナル」までを担い、発注は手動で行う半自動運用になります。
+> 完全自動発注には kabuステーションAPI を提供する三菱UFJ eスマート証券などの
+> 口座が必要です。
 
 ```
 ファンダメンタル選定 → テクニカル解析 → ニュース/SNSセンチメント補正 → 発注
@@ -93,16 +99,29 @@ autotrader run
 
 # 5) ペーパー口座の状態を表示
 autotrader account
+
+# 6) kabuステーションAPIへの接続確認（発注しない・セットアップの切り分け用）
+autotrader kabus-check          # ユニバース先頭の現在値で確認
+autotrader kabus-check 7203.T   # 銘柄を指定
 ```
 
 > モジュールとして実行する場合は `python -m autotrader.cli <command>`。
 
 ### ライブ発注（実弾）への切替
 
-1. Windows で **kabuステーション** を起動し、API設定でパスワードを発行
-2. `.env` に `KABUS_API_PASSWORD` と `KABUS_TRADE_PASSWORD` を設定
-3. `config.yaml` の `trading.mode` を `live` に
-4. `.env` で `AUTOTRADER_ENABLE_LIVE=true`（この二重ガードを通さない限りペーパーで動作）
+対応証券会社: **三菱UFJ eスマート証券（旧auカブコム証券）** の kabuステーションAPI。
+
+1. 三菱UFJ eスマート証券で口座を開設し、**kabuステーションの利用を申し込む**
+   （利用条件あり。最新は公式で確認）
+2. Windows で **kabuステーション** を起動・ログインし、設定→APIでパスワードを発行
+   （kabuステーションはWindows専用。APIは起動中PCの `localhost:18080` のみ応答）
+3. `.env` に `KABUS_API_PASSWORD` と `KABUS_TRADE_PASSWORD` を設定
+4. **`autotrader kabus-check` で接続を確認**（認証・現在値・余力。発注はしない）
+5. `config.yaml` の `trading.mode` を `live` に
+6. `.env` で `AUTOTRADER_ENABLE_LIVE=true`（この二重ガードを通さない限りペーパーで動作）
+
+> まずは検証環境（`KABUS_BASE_URL=http://localhost:18081/kabusapi`）で
+> 動作を確認してから本番（18080）に切り替えるのが安全です。
 
 ## 戦略ロジックの概要
 

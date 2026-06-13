@@ -55,6 +55,10 @@ class KabusBroker(Broker):
         log.info("kabuステーションAPI 認証成功")
         return self._token
 
+    def connect(self) -> None:
+        """明示的に認証を行う（接続チェック用の公開メソッド）。"""
+        self._authenticate()
+
     def _headers(self) -> dict[str, str]:
         if self._token is None:
             self._authenticate()
