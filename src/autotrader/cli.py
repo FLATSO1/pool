@@ -487,6 +487,17 @@ def _cmd_propose(cfg: Config) -> int:
         if d.action == "BUY":
             if block_buys or not can_open_new(broker.positions(), cfg.trading):
                 continue
+            # 発注直前の需給チェック（ライブ時のみ・板/1分足）
+            pressure_str, buy_ratio = "", None
+            if live and cfg.entry_filter.enabled:
+                pressure_str, buy_ratio = _compute_entry_pressure(cfg, broker, t)
+                if (
+                    cfg.entry_filter.veto
+                    and buy_ratio is not None
+                    and buy_ratio < cfg.entry_filter.min_buy_ratio
+                ):
+                    print(f"[見送り] {t} 売り圧が強い（買い圧{buy_ratio:.0%}）")
+                    continue
             opinion = review_candidate(
                 t, d.action, d.combined_score,
                 d.fundamental.reasons if d.fundamental else [],
@@ -502,6 +513,7 @@ def _cmd_propose(cfg: Config) -> int:
                     technical_reasons=d.technical.reasons if d.technical else [],
                     sentiment_summary=d.sentiment.summary if d.sentiment else "",
                     advisor=opinion.to_dict(),
+                    entry_pressure=pressure_str,
                 )
             )
         else:  # SELL（シグナル）
@@ -661,6 +673,32 @@ def _build_broker(cfg: Config, live: bool):
     return PaperBroker(cash=cfg.trading.cash)
 
 
+def _compute_entry_pressure(cfg: Config, broker, ticker: str):
+    """発注直前の需給（板/1分足）を算出。(summary文字列, 総合買い圧比 or None) を返す。"""
+    from .analysis.orderflow import board_imbalance, intraday_pressure
+    from .data.market_data import fetch_ohlcv
+
+    results = []
+    if cfg.entry_filter.use_intraday:
+        try:
+            df1m = fetch_ohlcv(ticker, period="2d", interval="1m")
+            r = intraday_pressure(df1m)
+            if r:
+                results.append(r)
+        except Exception:  # noqa: BLE001 - データ取得失敗は無視
+            pass
+    if cfg.entry_filter.use_board and hasattr(broker, "board"):
+        r = board_imbalance(broker.board(ticker))
+        if r:
+            results.append(r)
+
+    if not results:
+        return "", None
+    ratio = sum(r.buy_ratio for r in results) / len(results)
+    parts = [f"{r.source}:{r.buy_ratio:.0%}({r.label})" for r in results]
+    return f"買い圧 {ratio:.0%} [{', '.join(parts)}]", ratio
+
+
 def _latest_atrs(positions, ohlcv_map: dict, cfg: Config) -> dict[str, float]:
     """保有銘柄の直近ATRを返す（ATRベース損切り用）。"""
     from .analysis.technical import compute_indicators
@@ -748,6 +786,8 @@ def _print_proposal(p) -> None:
         print(f"  テクニカル: {', '.join(p.technical_reasons[:5])}")
     if p.sentiment_summary:
         print(f"  ニュース: {p.sentiment_summary}")
+    if getattr(p, "entry_pressure", ""):
+        print(f"  📈板/需給: {p.entry_pressure}")
     if p.advisor:
         a = p.advisor
         rec = {"go": "実行推奨", "caution": "注意", "skip": "見送り推奨"}.get(

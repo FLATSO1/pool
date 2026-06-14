@@ -26,6 +26,7 @@ class Proposal:
     technical_reasons: list[str] = field(default_factory=list)
     sentiment_summary: str = ""
     advisor: dict | None = None       # AdvisorOpinion.to_dict()
+    entry_pressure: str = ""          # 発注直前の需給（板/1分足。ライブ時のみ）
 
 
 @dataclass
