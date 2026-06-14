@@ -49,6 +49,17 @@ technical:
   ichimoku_kijun: 26
   ichimoku_senkou_b: 52
   ichimoku_shift: 26
+  # ストキャスティクス
+  stoch_k: 14
+  stoch_d: 3
+  stoch_smooth: 3
+  stoch_oversold: 20
+  stoch_overbought: 80
+  # DMI / ADX（ADXが閾値超のときだけ方向に投票＝弱いトレンドの順張りを抑制）
+  adx_period: 14
+  adx_threshold: 25
+  # ダイバージェンス（価格とRSIの逆行）の参照期間
+  divergence_lookback: 14
 
 # センチメント（ニュース/SNS）
 sentiment:

@@ -66,6 +66,50 @@ def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
 
 
+def stochastic(
+    df: pd.DataFrame, k: int = 14, d: int = 3, smooth: int = 3
+) -> pd.DataFrame:
+    """ストキャスティクス（スロー %K, %D）を返す。"""
+    low_n = df["low"].rolling(k, min_periods=k).min()
+    high_n = df["high"].rolling(k, min_periods=k).max()
+    rng = (high_n - low_n).replace(0.0, np.nan)
+    fast_k = 100.0 * (df["close"] - low_n) / rng
+    slow_k = fast_k.rolling(smooth, min_periods=smooth).mean()
+    slow_d = slow_k.rolling(d, min_periods=d).mean()
+    return pd.DataFrame({"stoch_k": slow_k, "stoch_d": slow_d})
+
+
+def dmi_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    """DMI（+DI, -DI）と ADX を返す（Wilder式）。"""
+    high, low, close = df["high"], df["low"], df["close"]
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    plus_dm = pd.Series(plus_dm, index=df.index)
+    minus_dm = pd.Series(minus_dm, index=df.index)
+
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
+        axis=1,
+    ).max(axis=1)
+    atr_n = tr.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+
+    plus_di = 100.0 * (
+        plus_dm.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+        / atr_n.replace(0.0, np.nan)
+    )
+    minus_di = 100.0 * (
+        minus_dm.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+        / atr_n.replace(0.0, np.nan)
+    )
+    di_sum = (plus_di + minus_di).replace(0.0, np.nan)
+    dx = 100.0 * (plus_di - minus_di).abs() / di_sum
+    adx = dx.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    return pd.DataFrame({"plus_di": plus_di, "minus_di": minus_di, "adx": adx})
+
+
 def ichimoku(
     df: pd.DataFrame,
     tenkan: int = 9,
@@ -139,9 +183,21 @@ def compute_indicators(df: pd.DataFrame, cfg: TechnicalConfig) -> pd.DataFrame:
             cfg.breakout_window, min_periods=cfg.breakout_window
         ).min()
 
-    # 一目均衡表・ATR（高安が必要）
+    # ダイバージェンス（価格とRSIの逆行）の参照用に過去値を保持
+    lb = cfg.divergence_lookback
+    out["close_lb_ago"] = close.shift(lb)
+    out["rsi_lb_ago"] = out["rsi"].shift(lb)
+
+    # 一目均衡表・ATR・ストキャス・DMI/ADX（高安が必要）
     if {"high", "low"}.issubset(out.columns):
         out["atr"] = atr(out, cfg.atr_period)
+        st = stochastic(out, cfg.stoch_k, cfg.stoch_d, cfg.stoch_smooth)
+        out["stoch_k"] = st["stoch_k"]
+        out["stoch_d"] = st["stoch_d"]
+        dm = dmi_adx(out, cfg.adx_period)
+        out["plus_di"] = dm["plus_di"]
+        out["minus_di"] = dm["minus_di"]
+        out["adx"] = dm["adx"]
         ich = ichimoku(
             out,
             cfg.ichimoku_tenkan,
@@ -178,6 +234,9 @@ _W_ICHI_CLOUD = 0.7   # 一目: 雲の上/下
 _W_ICHI_TRIPLE = 0.6  # 一目: 三役好転/逆転
 _W_PO = 0.7           # パーフェクトオーダー（移動平均3本の整列）
 _W_CDL = 0.4          # ローソク足パターン（短期・控えめな重み）
+_W_STOCH = 0.3        # ストキャスティクス（買われ/売られすぎ）
+_W_ADX = 0.5          # DMI/ADX（トレンド方向×強さ）
+_W_DIV = 0.4          # ダイバージェンス（価格とRSIの逆行）
 
 
 def _weighted_components(
@@ -262,6 +321,34 @@ def _weighted_components(
     if "cdl_bear" in ind.columns:
         add(ind["cdl_bear"], -1, _W_CDL)
 
+    # ストキャスティクス（買われ/売られすぎの逆張り）
+    if "stoch_k" in ind.columns:
+        add(ind["stoch_k"] <= cfg.stoch_oversold, +1, _W_STOCH)
+        add(ind["stoch_k"] >= cfg.stoch_overbought, -1, _W_STOCH)
+
+    # DMI/ADX（ADXが閾値超＝トレンドが強いときだけ方向に投票）
+    if {"plus_di", "minus_di", "adx"}.issubset(ind.columns):
+        strong = ind["adx"] >= cfg.adx_threshold
+        add(strong & (ind["plus_di"] > ind["minus_di"]), +1, _W_ADX)
+        add(strong & (ind["minus_di"] > ind["plus_di"]), -1, _W_ADX)
+
+    # ダイバージェンス（価格とRSIの逆行）
+    if {"close_lb_ago", "rsi_lb_ago", "rsi"}.issubset(ind.columns):
+        # 強気: 価格は下げたがRSIは上昇（売られすぎ圏から）
+        bull_div = (
+            (ind["close"] < ind["close_lb_ago"])
+            & (ind["rsi"] > ind["rsi_lb_ago"])
+            & (ind["rsi_lb_ago"] <= 40.0)
+        )
+        # 弱気: 価格は上げたがRSIは低下（買われすぎ圏から）
+        bear_div = (
+            (ind["close"] > ind["close_lb_ago"])
+            & (ind["rsi"] < ind["rsi_lb_ago"])
+            & (ind["rsi_lb_ago"] >= 60.0)
+        )
+        add(bull_div, +1, _W_DIV)
+        add(bear_div, -1, _W_DIV)
+
     return num, den
 
 
@@ -312,6 +399,10 @@ def generate_signal(
         "bb_lower": _f(last.get("bb_lower")),
         "ichimoku_span_a": _f(last.get("ichimoku_span_a")),
         "ichimoku_span_b": _f(last.get("ichimoku_span_b")),
+        "stoch_k": _f(last.get("stoch_k")),
+        "adx": _f(last.get("adx")),
+        "plus_di": _f(last.get("plus_di")),
+        "minus_di": _f(last.get("minus_di")),
     }
     return TechnicalSignal(ticker, round(score, 4), action, reasons, indicators)
 
@@ -376,6 +467,31 @@ def _build_reasons(last, prev, cfg: TechnicalConfig) -> list[str]:
             reasons.append("一目: 雲の上（強気）")
         elif last["close"] < bot:
             reasons.append("一目: 雲の下（弱気）")
+
+    # ストキャスティクス
+    if _valid(last.get("stoch_k")):
+        if last["stoch_k"] <= cfg.stoch_oversold:
+            reasons.append(f"ストキャス %K={last['stoch_k']:.0f} 売られすぎ")
+        elif last["stoch_k"] >= cfg.stoch_overbought:
+            reasons.append(f"ストキャス %K={last['stoch_k']:.0f} 買われすぎ")
+
+    # DMI / ADX
+    if _valid(last.get("plus_di"), last.get("minus_di"), last.get("adx")):
+        if last["adx"] >= cfg.adx_threshold:
+            if last["plus_di"] > last["minus_di"]:
+                reasons.append(f"DMI: +DI>-DI・ADX={last['adx']:.0f}（強い上昇）")
+            else:
+                reasons.append(f"DMI: -DI>+DI・ADX={last['adx']:.0f}（強い下降）")
+
+    # ダイバージェンス
+    if _valid(last.get("close"), last.get("close_lb_ago"),
+              last.get("rsi"), last.get("rsi_lb_ago")):
+        if (last["close"] < last["close_lb_ago"] and last["rsi"] > last["rsi_lb_ago"]
+                and last["rsi_lb_ago"] <= 40.0):
+            reasons.append("強気ダイバージェンス（価格↓だがRSI↑）")
+        elif (last["close"] > last["close_lb_ago"] and last["rsi"] < last["rsi_lb_ago"]
+                and last["rsi_lb_ago"] >= 60.0):
+            reasons.append("弱気ダイバージェンス（価格↑だがRSI↓）")
 
     # ローソク足パターン（成立したものを名前で表示）
     for col, label in {**candlestick.BULLISH_PATTERNS, **candlestick.BEARISH_PATTERNS}.items():

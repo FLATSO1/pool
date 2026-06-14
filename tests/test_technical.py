@@ -102,6 +102,39 @@ def test_perfect_order_reason_on_uptrend(uptrend_ohlcv):
     assert "パーフェクトオーダー" in joined or "雲の上" in joined
 
 
+def test_stochastic_bounds():
+    n = 100
+    idx = pd.date_range("2023-01-01", periods=n, freq="B")
+    rng = np.random.default_rng(1)
+    close = pd.Series(100 + np.cumsum(rng.normal(0, 1, n)), index=idx)
+    df = pd.DataFrame(
+        {"high": close + 1, "low": close - 1, "close": close}, index=idx
+    )
+    st = ta.stochastic(df, 14, 3, 3).dropna()
+    assert (st["stoch_k"] >= -0.001).all() and (st["stoch_k"] <= 100.001).all()
+
+
+def test_dmi_adx_strong_trend_has_high_adx():
+    n = 120
+    idx = pd.date_range("2023-01-01", periods=n, freq="B")
+    close = pd.Series(np.linspace(100, 200, n), index=idx)  # 一方向の強いトレンド
+    df = pd.DataFrame(
+        {"high": close + 1, "low": close - 1, "close": close}, index=idx
+    )
+    dm = ta.dmi_adx(df, 14).dropna()
+    assert list(dm.columns) == ["plus_di", "minus_di", "adx"]
+    # 強い上昇では ADX は高く、+DI > -DI
+    assert dm["adx"].iloc[-1] > 25
+    assert dm["plus_di"].iloc[-1] > dm["minus_di"].iloc[-1]
+
+
+def test_indicators_include_stoch_and_adx(uptrend_ohlcv):
+    cfg = TechnicalConfig()
+    sig = ta.generate_signal("T.T", uptrend_ohlcv, cfg)
+    assert "stoch_k" in sig.indicators
+    assert "adx" in sig.indicators
+
+
 def test_bollinger_lower_touch_is_bullish_vote():
     # 終値が下バンドに張り付くケースを構成し、逆張り買い票が入ることを確認
     cfg = TechnicalConfig(bb_window=20, bb_std=2.0)

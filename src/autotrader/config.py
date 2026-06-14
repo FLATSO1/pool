@@ -55,6 +55,17 @@ class TechnicalConfig:
     ichimoku_kijun: int = 26
     ichimoku_senkou_b: int = 52
     ichimoku_shift: int = 26
+    # ストキャスティクス
+    stoch_k: int = 14
+    stoch_d: int = 3
+    stoch_smooth: int = 3
+    stoch_oversold: float = 20.0
+    stoch_overbought: float = 80.0
+    # DMI / ADX
+    adx_period: int = 14
+    adx_threshold: float = 25.0
+    # ダイバージェンス（価格とRSIの逆行）の参照期間
+    divergence_lookback: int = 14
 
 
 @dataclass
