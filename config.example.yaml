@@ -96,6 +96,15 @@ advisor:
   risk_off_block_buys: true   # 地合いrisk_off時に新規買いを見送る
   skip_blocks_buy: true       # アドバイザーが skip 判断なら買い候補から外す
 
+# 発注直前の需給チェック（ライブ時のみ動作・バックテストには影響しない）
+# 「日足で買うと決めた銘柄」を発注する直前に、板/1分足で買い・売り圧を確認する。
+entry_filter:
+  enabled: true          # 買い候補の売買圧を算出・提示する
+  use_intraday: true     # 1分足の売買圧（yfinance・直近のみ）
+  use_board: true        # 板の偏り（kabuステーション）
+  veto: false            # true: 買い圧が閾値未満なら新規買いを見送る
+  min_buy_ratio: 0.4     # vetoの閾値（買い圧比がこれ未満で見送り）
+
 # スマホ通知（売買・アラート・サマリ）。秘密情報は .env に設定。
 notify:
   enabled: true

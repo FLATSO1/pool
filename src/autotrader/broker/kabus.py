@@ -122,15 +122,19 @@ class KabusBroker(Broker):
             )
         return OrderResult(False, message=f"発注拒否: {data}")
 
-    def quote(self, ticker: str) -> float | None:
-        """現在値（板情報の CurrentPrice）。"""
+    def board(self, ticker: str) -> dict | None:
+        """板情報（気配値・数量）の生データを返す。"""
         symbol = f"{self._symbol(ticker)}@{self._exchange}"
         try:
-            data = self._request("GET", f"/board/{symbol}")
+            return self._request("GET", f"/board/{symbol}")
         except requests.RequestException as exc:
             log.warning("板情報取得失敗 %s: %s", ticker, exc)
             return None
-        return data.get("CurrentPrice")
+
+    def quote(self, ticker: str) -> float | None:
+        """現在値（板情報の CurrentPrice）。"""
+        data = self.board(ticker)
+        return data.get("CurrentPrice") if data else None
 
     def positions(self) -> dict[str, Position]:
         try:

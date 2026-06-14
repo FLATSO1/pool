@@ -132,6 +132,17 @@ class AdvisorConfig:
 
 
 @dataclass
+class EntryFilterConfig:
+    """発注直前の需給チェック（ライブ時のみ。バックテストには影響しない）。"""
+
+    enabled: bool = True        # 買い候補の売買圧を算出・表示する
+    use_intraday: bool = True   # 1分足の売買圧を使う（yfinance）
+    use_board: bool = True      # 板の偏りを使う（kabuステーション）
+    veto: bool = False          # True: 買い圧が閾値未満なら新規買いを見送る
+    min_buy_ratio: float = 0.4  # vetoの閾値（買い圧比がこれ未満で見送り）
+
+
+@dataclass
 class TradingConfig:
     mode: str = "paper"  # "paper" | "live"
     exchange: int = 1
@@ -189,6 +200,7 @@ class Config:
     technical: TechnicalConfig = field(default_factory=TechnicalConfig)
     sentiment: SentimentConfig = field(default_factory=SentimentConfig)
     advisor: AdvisorConfig = field(default_factory=AdvisorConfig)
+    entry_filter: EntryFilterConfig = field(default_factory=EntryFilterConfig)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
@@ -217,6 +229,7 @@ class Config:
             technical=technical,
             sentiment=_build(SentimentConfig, raw.get("sentiment")),
             advisor=_build(AdvisorConfig, raw.get("advisor")),
+            entry_filter=_build(EntryFilterConfig, raw.get("entry_filter")),
             notify=_build(NotifyConfig, raw.get("notify")),
             safety=_build(SafetyConfig, raw.get("safety")),
             trading=_build(TradingConfig, raw.get("trading")),
