@@ -36,6 +36,7 @@ class BacktestResult:
     equity_curve: pd.Series
     trades: list[Trade] = field(default_factory=list)
     initial_cash: float = 0.0
+    benchmark_return: float = 0.0  # 全候補を均等に買い持ちした場合のリターン
 
     @property
     def final_equity(self) -> float:
@@ -62,11 +63,23 @@ class BacktestResult:
             return 0.0
         return float(np.sqrt(periods_per_year) * rets.mean() / rets.std())
 
+    def excess_return(self) -> float:
+        """戦略リターン − バイ&ホールド（プラスなら売買が価値を生んだ）。"""
+        return self.total_return - self.benchmark_return
+
     def summary(self) -> str:
+        verdict = (
+            "✅ バイ&ホールドを上回った"
+            if self.excess_return() > 0
+            else "⚠️ バイ&ホールドに負けた（売買の価値が出ていない）"
+        )
         return (
             f"初期資金: {self.initial_cash:,.0f}円\n"
             f"最終資産: {self.final_equity:,.0f}円\n"
             f"トータルリターン: {self.total_return * 100:+.2f}%\n"
+            f"バイ&ホールド比較: {self.benchmark_return * 100:+.2f}%"
+            f"（差 {self.excess_return() * 100:+.2f}%）\n"
+            f"  → {verdict}\n"
             f"最大ドローダウン: {self.max_drawdown() * 100:.2f}%\n"
             f"シャープレシオ: {self.sharpe():.2f}\n"
             f"約定回数: {len(self.trades)}"
@@ -177,4 +190,22 @@ class Backtester:
             equity_points.append(equity)
 
         curve = pd.Series(equity_points, index=index, name="equity")
-        return BacktestResult(curve, trades, self.cfg.trading.cash)
+        benchmark = self._buy_and_hold_return(closes, passed_tickers)
+        return BacktestResult(curve, trades, self.cfg.trading.cash, benchmark)
+
+    @staticmethod
+    def _buy_and_hold_return(
+        closes: dict[str, pd.Series], passed_tickers: set[str] | None
+    ) -> float:
+        """全候補を均等配分で買い持ちした場合の平均リターン（等加重）。"""
+        universe = (
+            [t for t in closes if t in passed_tickers]
+            if passed_tickers
+            else list(closes)
+        )
+        rets: list[float] = []
+        for t in universe:
+            s = closes[t].dropna()
+            if len(s) >= 2 and s.iloc[0] > 0:
+                rets.append(float(s.iloc[-1] / s.iloc[0] - 1.0))
+        return sum(rets) / len(rets) if rets else 0.0

@@ -7,11 +7,16 @@ YAMLファイル＋環境変数（.env）からアプリ全体の設定を組み
 from __future__ import annotations
 
 import os
+import unicodedata
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from .logging_setup import get_logger
+
+log = get_logger(__name__)
 
 
 def _load_dotenv() -> None:
@@ -229,12 +234,28 @@ def _read_text_tolerant(path: Path) -> str:
     UTF-8(BOM可)→cp932 の順に試し、最後はUTF-8で置換デコードする。
     """
     data = Path(path).read_bytes()
+    text: str | None = None
     for enc in ("utf-8-sig", "utf-8", "cp932"):
         try:
-            return data.decode(enc)
+            text = data.decode(enc)
+            break
         except UnicodeDecodeError:
             continue
-    return data.decode("utf-8", errors="replace")
+    if text is None:
+        text = data.decode("utf-8", errors="replace")
+
+    # 破損ファイル対策: YAMLが受け付けない制御文字(Cc)をタブ・改行以外は除去。
+    # （Windowsで文字コードが壊れると U+0080 等が混入し YAML が拒否するため）
+    cleaned = "".join(
+        ch for ch in text if ch in "\t\n\r" or unicodedata.category(ch) != "Cc"
+    )
+    if cleaned != text:
+        log.warning(
+            "設定ファイルに不正な制御文字が含まれていたため除去しました: %s "
+            "（文字コードが壊れている可能性。config.example.yaml から作り直しを推奨）",
+            path,
+        )
+    return cleaned
 
 
 def _resolve_config_path(path: str | Path | None) -> Path | None:

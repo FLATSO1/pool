@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from autotrader.backtest.backtester import Backtester
 from autotrader.config import Config, SentimentConfig
 from autotrader.data.fundamentals import Fundamentals
@@ -71,6 +73,21 @@ def test_backtest_empty_input():
     cfg = _config_no_sentiment()
     result = Backtester(cfg).run({})
     assert result.final_equity == 0.0
+
+
+def test_backtest_benchmark_and_excess(uptrend_ohlcv, downtrend_ohlcv):
+    cfg = _config_no_sentiment()
+    cfg.trading.buy_score_threshold = 0.2
+    result = Backtester(cfg).run({"UP.T": uptrend_ohlcv, "DN.T": downtrend_ohlcv})
+    # バイ&ホールドは UP(上昇) と DN(下降) の平均リターン
+    up_ret = uptrend_ohlcv["close"].iloc[-1] / uptrend_ohlcv["close"].iloc[0] - 1
+    dn_ret = downtrend_ohlcv["close"].iloc[-1] / downtrend_ohlcv["close"].iloc[0] - 1
+    assert result.benchmark_return == pytest.approx((up_ret + dn_ret) / 2, rel=1e-6)
+    # 超過リターン＝戦略−ベンチマーク
+    assert result.excess_return() == pytest.approx(
+        result.total_return - result.benchmark_return, rel=1e-9
+    )
+    assert "バイ&ホールド比較" in result.summary()
 
 
 def test_weight_zero_disables_all_signals(uptrend_ohlcv):

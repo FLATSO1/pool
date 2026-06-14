@@ -32,3 +32,13 @@ def test_load_utf8_bom_config(tmp_path):
     p.write_text("trading:\n  max_positions: 7\n", encoding="utf-8-sig")
     cfg = Config.load(p)
     assert cfg.trading.max_positions == 7
+
+
+def test_load_corrupted_control_char(tmp_path):
+    # 破損で混入した制御文字(U+0080)があっても読めること
+    p = tmp_path / "config.yaml"
+    p.write_bytes(
+        "# \x80 corrupted comment\ntrading:\n  cash: 300000\n".encode("utf-8")
+    )
+    cfg = Config.load(p)
+    assert cfg.trading.cash == 300000
