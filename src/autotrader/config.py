@@ -99,6 +99,17 @@ class SentimentConfig:
 
 
 @dataclass
+class AdvisorConfig:
+    """Claudeを「提案レビュー＋地合い判定」のアドバイザーとして使う設定。"""
+
+    enabled: bool = True
+    model: str = "claude-opus-4-8"
+    regime_enabled: bool = True          # 地合いゲートを使うか
+    risk_off_block_buys: bool = True     # 地合いrisk_off時に新規買いを止める
+    skip_blocks_buy: bool = True         # アドバイザーが skip と判断したら買わない
+
+
+@dataclass
 class TradingConfig:
     mode: str = "paper"  # "paper" | "live"
     exchange: int = 1
@@ -147,6 +158,7 @@ class Config:
     fundamental: FundamentalConfig = field(default_factory=FundamentalConfig)
     technical: TechnicalConfig = field(default_factory=TechnicalConfig)
     sentiment: SentimentConfig = field(default_factory=SentimentConfig)
+    advisor: AdvisorConfig = field(default_factory=AdvisorConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
     secrets: Secrets = field(default_factory=Secrets.from_env)
@@ -173,6 +185,7 @@ class Config:
             fundamental=_build(FundamentalConfig, raw.get("fundamental")),
             technical=technical,
             sentiment=_build(SentimentConfig, raw.get("sentiment")),
+            advisor=_build(AdvisorConfig, raw.get("advisor")),
             trading=_build(TradingConfig, raw.get("trading")),
             backtest=_build(BacktestConfig, raw.get("backtest")),
             secrets=Secrets.from_env(),

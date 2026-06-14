@@ -86,6 +86,16 @@ sentiment:
   max_headlines: 15
   weight: 0.3             # 最終判断にセンチメントを反映する重み（0–1）
 
+# Claudeアドバイザー（提案レビュー＋地合いゲート）
+# propose コマンドで使う。決定論エンジンの候補をClaudeがレビューし、
+# 市場全体のニュースから地合いを判定して新規買いを調整する。
+advisor:
+  enabled: true
+  model: "claude-opus-4-8"
+  regime_enabled: true        # 地合い判定を使う
+  risk_off_block_buys: true   # 地合いrisk_off時に新規買いを見送る
+  skip_blocks_buy: true       # アドバイザーが skip 判断なら買い候補から外す
+
 # 売買・リスク管理
 trading:
   mode: "paper"           # "paper" | "live"（liveは AUTOTRADER_ENABLE_LIVE=true も必須）

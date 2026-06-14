@@ -42,6 +42,17 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="発注せず判断のみ表示"
     )
 
+    sub.add_parser(
+        "propose", help="売買候補を根拠つきで提示（Claudeレビュー＋地合い）。発注はしない"
+    )
+    p_exec = sub.add_parser(
+        "execute", help="propose の提案を承認して発注"
+    )
+    p_exec.add_argument("--yes", action="store_true", help="全提案を確認なしで発注")
+    p_exec.add_argument(
+        "--only", help="この銘柄だけ対象（カンマ区切り。例: 7203.T,6758.T）"
+    )
+
     sub.add_parser("account", help="ペーパー口座状態を表示")
 
     p_kc = sub.add_parser(
@@ -64,6 +75,13 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_eval_signals(cfg)
     if args.command == "run":
         return _cmd_run(cfg, dry_run=args.dry_run)
+    if args.command == "propose":
+        return _cmd_propose(cfg)
+    if args.command == "execute":
+        only = (
+            {t.strip() for t in args.only.split(",")} if args.only else None
+        )
+        return _cmd_execute(cfg, approve_all=args.yes, only=only)
     if args.command == "account":
         return _cmd_account(cfg)
     if args.command == "kabus-check":
@@ -295,6 +313,156 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
     return 0
 
 
+def _cmd_propose(cfg: Config) -> int:
+    """売買候補を根拠つきで提示し、proposals.json に保存（発注はしない）。"""
+    from .analysis.advisor import review_candidate
+    from .analysis.market_regime import assess_market
+    from .data.fundamentals import fetch_fundamentals
+    from .data.market_data import fetch_ohlcv, latest_price
+    from .data.news import fetch_headlines
+    from .data.universe import load_universe
+    from .portfolio import can_open_new, check_risk_exits
+    from .strategy.engine import StrategyEngine
+    from .strategy.proposal import Proposal, save_proposals
+
+    live = cfg.live_enabled()
+    broker = _build_broker(cfg, live)
+    api_key = cfg.secrets.anthropic_api_key
+
+    # 地合い判定（Claude）
+    regime = assess_market(cfg.advisor, api_key)
+    print("=== 売買提案 ===")
+    print(
+        f"地合い: {regime.regime} (bias {regime.bias:+.2f}) — {regime.summary}\n"
+    )
+    block_buys = (
+        cfg.advisor.enabled
+        and cfg.advisor.regime_enabled
+        and cfg.advisor.risk_off_block_buys
+        and regime.blocks_new_buys()
+    )
+    if block_buys:
+        print("⚠️ 地合いが risk_off のため、新規買いは見送り（売り/決済のみ提示）\n")
+
+    # 価格収集
+    ohlcv_map: dict = {}
+    prices: dict[str, float] = {}
+    for t in load_universe(cfg):
+        df = fetch_ohlcv(t, period="1y")
+        if df.empty:
+            continue
+        ohlcv_map[t] = df
+        px = latest_price(df)
+        if px is not None:
+            prices[t] = px
+
+    proposals: list[Proposal] = []
+
+    # 1) リスク決済（損切り/利確）
+    for ex in check_risk_exits(broker.positions(), prices, cfg.trading):
+        proposals.append(
+            Proposal(
+                ticker=ex.ticker, action="SELL", quantity=ex.quantity,
+                price=prices.get(ex.ticker), combined_score=0.0,
+                reason=f"{ex.reason}（損益 {ex.pnl_pct * 100:+.1f}%）",
+            )
+        )
+
+    # 2) シグナル評価
+    engine = StrategyEngine(cfg)
+    equity = broker.snapshot().equity(prices)
+    for t, df in ohlcv_map.items():
+        headlines = (
+            fetch_headlines(t, cfg.sentiment.lookback_days, cfg.sentiment.max_headlines)
+            if cfg.sentiment.enabled
+            else []
+        )
+        d = engine.evaluate(t, df, fetch_fundamentals(t), headlines, equity)
+        if d.action == "HOLD":
+            continue
+        if d.action == "BUY":
+            if block_buys or not can_open_new(broker.positions(), cfg.trading):
+                continue
+            opinion = review_candidate(
+                t, d.action, d.combined_score,
+                d.fundamental.reasons if d.fundamental else [],
+                d.technical.reasons if d.technical else [],
+                d.sentiment.summary if d.sentiment else "",
+                headlines, cfg.advisor, api_key,
+            )
+            proposals.append(
+                Proposal(
+                    ticker=t, action="BUY", quantity=d.quantity, price=d.price,
+                    combined_score=d.combined_score,
+                    fundamental_reasons=d.fundamental.reasons if d.fundamental else [],
+                    technical_reasons=d.technical.reasons if d.technical else [],
+                    sentiment_summary=d.sentiment.summary if d.sentiment else "",
+                    advisor=opinion.to_dict(),
+                )
+            )
+        else:  # SELL（シグナル）
+            held = _held_qty(broker, t)
+            if held > 0:
+                proposals.append(
+                    Proposal(
+                        ticker=t, action="SELL", quantity=held,
+                        price=d.price, combined_score=d.combined_score,
+                        reason="売りシグナル",
+                        technical_reasons=d.technical.reasons if d.technical else [],
+                    )
+                )
+
+    if not proposals:
+        print("提案なし（条件を満たす売買候補がありませんでした）。")
+        return 0
+
+    for p in proposals:
+        _print_proposal(p)
+
+    path = save_proposals(proposals, cfg.trading.mode, regime.to_dict())
+    print(f"\n提案を保存しました: {path}")
+    print("内容を確認のうえ、`autotrader execute` で承認・発注してください。")
+    return 0
+
+
+def _cmd_execute(cfg: Config, approve_all: bool, only: set | None) -> int:
+    """propose の提案を読み込み、承認した分だけ発注する。"""
+    from .strategy.proposal import load_proposals
+
+    ps = load_proposals()
+    if ps is None or not ps.proposals:
+        print("提案がありません。先に `autotrader propose` を実行してください。")
+        return 1
+
+    live = cfg.live_enabled()
+    broker = _build_broker(cfg, live)
+    label = "ライブ" if live else "ペーパー"
+    print(f"=== 提案の実行（{label}）===")
+    print(f"提案作成: {ps.created_at}\n")
+
+    executed = 0
+    for p in ps.proposals:
+        if only and p.ticker not in only:
+            continue
+        _print_proposal(p)
+        if approve_all:
+            approved = True
+        else:
+            try:
+                ans = input(f"  → {p.ticker} {p.action} {p.quantity}株を発注？ [y/N]: ")
+            except EOFError:
+                ans = "n"
+            approved = ans.strip().lower() in ("y", "yes")
+        if approved:
+            _submit(broker, p.ticker, p.action, p.quantity, p.price)
+            executed += 1
+        else:
+            print("    → 見送り")
+
+    print(f"\n発注した提案: {executed}件")
+    return 0
+
+
 def _cmd_account(cfg: Config) -> int:
     from .broker.paper import PaperBroker
 
@@ -405,6 +573,33 @@ def _print_decision(d) -> None:
             print(f"  • {r}")
     if d.sentiment:
         print(f"\n--- センチメント要約 ---\n  {d.sentiment.summary}")
+
+
+def _print_proposal(p) -> None:
+    mark = "🟢買い" if p.action == "BUY" else "🔴売り"
+    price = f"{p.price:,.0f}円" if p.price else "—"
+    print(f"\n[{mark}] {p.ticker}  {p.quantity}株  参考{price}  スコア{p.combined_score:+.2f}")
+    if p.reason:
+        print(f"  理由: {p.reason}")
+    if p.fundamental_reasons:
+        print(f"  ファンダ: {', '.join(p.fundamental_reasons)}")
+    if p.technical_reasons:
+        print(f"  テクニカル: {', '.join(p.technical_reasons[:5])}")
+    if p.sentiment_summary:
+        print(f"  ニュース: {p.sentiment_summary}")
+    if p.advisor:
+        a = p.advisor
+        rec = {"go": "実行推奨", "caution": "注意", "skip": "見送り推奨"}.get(
+            a.get("recommendation", ""), a.get("recommendation", "")
+        )
+        print(
+            f"  🤖アドバイザー: {rec}（確信度 {a.get('confidence', 0) * 100:.0f}% / "
+            f"{a.get('source', '')}）"
+        )
+        if a.get("rationale"):
+            print(f"     {a['rationale']}")
+        for risk in a.get("risks", [])[:3]:
+            print(f"     ⚠ {risk}")
 
 
 def _print_account(broker, prices: dict[str, float]) -> None:

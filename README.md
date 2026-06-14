@@ -31,6 +31,9 @@
   ローソク足パターン（酒田五法）を加重統合（TA-Lib不要、pandasのみ）
 - **センチメント** — Claude API（`claude-opus-4-8`）でニュース/SNS見出しを解析。
   APIキーが無い場合は辞書ベースに自動フォールバック
+- **承認フロー＋Claudeアドバイザー** — `propose` で売買候補を根拠つきで提示
+  （Claudeが各候補を go/caution/skip でレビュー＋リスク指摘、市場全体の地合いも判定）、
+  `execute` で承認した分だけ発注。お金を動かす判断は決定論エンジンが担い、Claudeは助言役
 - **ブローカー抽象化** — 同一インターフェースで **ペーパー** と **ライブ（kabuステーション）** を切替
 - **バックテスト** — 損切り/利確・手数料・資金配分・同時保有数を考慮した検証
 - **安全ガード** — ライブ発注はデフォルト無効（`AUTOTRADER_ENABLE_LIVE=true` が必須）
@@ -102,6 +105,12 @@ autotrader eval-signals
 # 4) 1サイクル評価して発注（既定はペーパー）。判断だけ見るなら --dry-run
 autotrader run --dry-run
 autotrader run
+
+# 4b) 承認フロー: 根拠つきで提案 → 確認 → 承認した分だけ発注
+autotrader propose                 # 候補を提示し proposals.json に保存（発注しない）
+autotrader execute                 # 1件ずつ y/N で承認して発注
+autotrader execute --only 7203.T   # 特定銘柄だけ
+autotrader execute --yes           # 全提案を一括発注
 
 # 5) ペーパー口座の状態を表示
 autotrader account
@@ -187,6 +196,29 @@ divergence             -17.6%    -19.0%   -3.53     7%    29
 
 → 上位（効いた）シグナルを重く、下位を軽く/無効にして再検証、という
 ワークフローで戦略を磨けます。
+
+## 承認フローとClaudeアドバイザー
+
+実弾でいきなり自動発注するのではなく、「**提案 → あなたが確認 → 承認した分だけ発注**」
+の流れにできます。
+
+```
+autotrader propose
+   │  ・地合い判定（Claudeが市場全体のニュースから risk_on/neutral/risk_off）
+   │  ・各買い候補をClaudeがレビュー（go/caution/skip・確信度・リスク・平易な説明）
+   │  ・proposals.json に保存（この時点では発注しない）
+   ▼
+（あなたが内容を確認）
+   ▼
+autotrader execute        # 1件ずつ y/N、または --only / --yes
+```
+
+**設計思想**: お金を動かす最終ロジックは決定論的な指標（テスト可能・再現可能）が担い、
+Claudeはその上の「レビュー・説明・地合い判断」に徹します。LLMに直接トレードを
+決めさせない（ハルシネーション・非再現性の回避）ことで、精度と安全性を両立します。
+
+`advisor.enabled: false` でClaudeレビューを切れば、決定論のみの提案になります。
+APIキーが無い場合はスコアベースのフォールバックで動作します。
 
 ## 今後の拡張案
 
