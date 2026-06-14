@@ -297,8 +297,11 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
     peaks = _load_peaks()
     peaks = update_peaks(peaks, broker.positions(), prices)
 
+    # ATRベース損切り用に、保有銘柄の直近ATRを用意
+    atrs = _latest_atrs(broker.positions(), ohlcv_map, cfg)
+
     # 1) リスク決済（安全ガードに関係なく常に実行）
-    for ex in check_risk_exits(broker.positions(), prices, cfg.trading, peaks):
+    for ex in check_risk_exits(broker.positions(), prices, cfg.trading, peaks, atrs):
         msg = (
             f"💰決済 {ex.ticker} {ex.quantity}株 "
             f"理由={ex.reason} 損益={ex.pnl_pct * 100:+.1f}%"
@@ -656,6 +659,23 @@ def _build_broker(cfg: Config, live: bool):
             exchange=cfg.trading.exchange,
         )
     return PaperBroker(cash=cfg.trading.cash)
+
+
+def _latest_atrs(positions, ohlcv_map: dict, cfg: Config) -> dict[str, float]:
+    """保有銘柄の直近ATRを返す（ATRベース損切り用）。"""
+    from .analysis.technical import compute_indicators
+
+    out: dict[str, float] = {}
+    for t in positions:
+        df = ohlcv_map.get(t)
+        if df is None or df.empty:
+            continue
+        ind = compute_indicators(df, cfg.technical)
+        if "atr" in ind.columns and len(ind):
+            v = ind["atr"].iloc[-1]
+            if v == v and v > 0:  # NaN除外
+                out[t] = float(v)
+    return out
 
 
 _PEAKS_PATH = "data/state/peaks.json"

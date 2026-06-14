@@ -102,13 +102,16 @@ class Backtester:
         if not ohlcv:
             return BacktestResult(pd.Series(dtype=float), [], self.cfg.trading.cash)
 
-        # 各銘柄のテクニカルスコア系列と終値を準備
+        # 各銘柄のテクニカルスコア系列・終値・ATRを準備
         scores: dict[str, pd.Series] = {}
         closes: dict[str, pd.Series] = {}
+        atrs: dict[str, pd.Series] = {}
         for t, df in ohlcv.items():
             ind = compute_indicators(df, self.cfg.technical)
             scores[t] = score_frame(ind, self.cfg.technical)
             closes[t] = df["close"]
+            if "atr" in ind.columns:
+                atrs[t] = ind["atr"]
 
         # 共通の日付インデックス（全銘柄の和集合）
         index = sorted(set().union(*[df.index for df in ohlcv.values()]))
@@ -147,11 +150,21 @@ class Backtester:
                 pos = positions[t]
                 pnl = (px - pos.avg_price) / pos.avg_price if pos.avg_price else 0.0
                 reason = None
-                if t_cfg.stop_loss_pct > 0 and pnl <= -t_cfg.stop_loss_pct:
+
+                # 損切り（ATR優先、無ければ固定%）
+                atr_now = None
+                if t in atrs and date in atrs[t].index:
+                    a = atrs[t].loc[date]
+                    atr_now = float(a) if a == a else None  # NaN除外
+                if t_cfg.stop_loss_atr_mult > 0 and atr_now and atr_now > 0:
+                    if px <= pos.avg_price - t_cfg.stop_loss_atr_mult * atr_now:
+                        reason = "stop_loss_atr"
+                elif t_cfg.stop_loss_pct > 0 and pnl <= -t_cfg.stop_loss_pct:
                     reason = "stop_loss"
-                elif t_cfg.take_profit_pct > 0 and pnl >= t_cfg.take_profit_pct:
+
+                if reason is None and t_cfg.take_profit_pct > 0 and pnl >= t_cfg.take_profit_pct:
                     reason = "take_profit"
-                elif t_cfg.trailing_stop_pct > 0:
+                if reason is None and t_cfg.trailing_stop_pct > 0:
                     peak = peaks.get(t, pos.avg_price)
                     if peak > 0 and px <= peak * (1 - t_cfg.trailing_stop_pct):
                         reason = "trailing_stop"
