@@ -194,8 +194,7 @@ class Config:
         raw: dict[str, Any] = {}
         candidate = _resolve_config_path(path)
         if candidate is not None:
-            with open(candidate, "r", encoding="utf-8") as f:
-                raw = yaml.safe_load(f) or {}
+            raw = yaml.safe_load(_read_text_tolerant(candidate)) or {}
 
         technical = _build(TechnicalConfig, raw.get("technical"))
         # 部分指定された重みは既定値にマージ（未指定キーは既定のまま）
@@ -221,6 +220,21 @@ class Config:
     def live_enabled(self) -> bool:
         """ライブ発注が実際に許可されているか（モード＝live かつ 環境変数で明示有効）。"""
         return self.trading.mode == "live" and self.secrets.enable_live
+
+
+def _read_text_tolerant(path: Path) -> str:
+    """文字コードに寛容にテキストを読む。
+
+    Windowsで設定ファイルがShift-JIS(cp932)等で保存されても読めるよう、
+    UTF-8(BOM可)→cp932 の順に試し、最後はUTF-8で置換デコードする。
+    """
+    data = Path(path).read_bytes()
+    for enc in ("utf-8-sig", "utf-8", "cp932"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def _resolve_config_path(path: str | Path | None) -> Path | None:
