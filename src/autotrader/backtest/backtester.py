@@ -116,6 +116,7 @@ class Backtester:
 
         cash = self.cfg.trading.cash
         positions: dict[str, Position] = {}
+        peaks: dict[str, float] = {}  # 建玉以降の高値（トレイリングストップ用）
         trades: list[Trade] = []
         equity_points: list[float] = []
         t_cfg = self.cfg.trading
@@ -132,18 +133,33 @@ class Backtester:
             prices = {t: price_on(t, date) for t in ohlcv}
             prices = {t: p for t, p in prices.items() if p is not None}
 
-            # 1) リスク決済（損切り/利確）
+            # 0) 高値更新（トレイリングストップ用）
+            for t in list(positions):
+                px = prices.get(t)
+                if px is not None:
+                    peaks[t] = max(peaks.get(t, positions[t].avg_price), px)
+
+            # 1) リスク決済（損切り/利確/トレイリングストップ）
             for t in list(positions):
                 px = prices.get(t)
                 if px is None:
                     continue
                 pos = positions[t]
                 pnl = (px - pos.avg_price) / pos.avg_price if pos.avg_price else 0.0
-                if pnl <= -t_cfg.stop_loss_pct or pnl >= t_cfg.take_profit_pct:
+                reason = None
+                if t_cfg.stop_loss_pct > 0 and pnl <= -t_cfg.stop_loss_pct:
+                    reason = "stop_loss"
+                elif t_cfg.take_profit_pct > 0 and pnl >= t_cfg.take_profit_pct:
+                    reason = "take_profit"
+                elif t_cfg.trailing_stop_pct > 0:
+                    peak = peaks.get(t, pos.avg_price)
+                    if peak > 0 and px <= peak * (1 - t_cfg.trailing_stop_pct):
+                        reason = "trailing_stop"
+                if reason:
                     cash += px * pos.quantity * (1 - commission)
-                    reason = "stop_loss" if pnl < 0 else "take_profit"
                     trades.append(Trade(date, t, "SELL", pos.quantity, px, reason))
                     del positions[t]
+                    peaks.pop(t, None)
 
             # 2) シグナルに基づく売買
             for t in ohlcv:
@@ -161,6 +177,7 @@ class Backtester:
                     cash += px * pos.quantity * (1 - commission)
                     trades.append(Trade(date, t, "SELL", pos.quantity, px, "signal"))
                     del positions[t]
+                    peaks.pop(t, None)
                     continue
 
                 # 買い
@@ -180,6 +197,7 @@ class Backtester:
                     if qty > 0 and cost <= cash:
                         cash -= cost
                         positions[t] = Position(t, qty, px)
+                        peaks[t] = px
                         trades.append(Trade(date, t, "BUY", qty, px, "signal"))
 
             # 3) 資産評価

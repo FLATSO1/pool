@@ -255,7 +255,7 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
     from .data.news import fetch_headlines
     from .data.universe import load_universe
     from .notify import build_notifier
-    from .portfolio import can_open_new, check_risk_exits
+    from .portfolio import can_open_new, check_risk_exits, update_peaks
     from .safety import SafetyGuard
     from .strategy.engine import StrategyEngine
 
@@ -293,8 +293,12 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
     guard.begin_day(equity)
     actions: list[str] = []
 
+    # トレイリングストップ用の高値を読み込み・更新
+    peaks = _load_peaks()
+    peaks = update_peaks(peaks, broker.positions(), prices)
+
     # 1) リスク決済（安全ガードに関係なく常に実行）
-    for ex in check_risk_exits(broker.positions(), prices, cfg.trading):
+    for ex in check_risk_exits(broker.positions(), prices, cfg.trading, peaks):
         msg = (
             f"💰決済 {ex.ticker} {ex.quantity}株 "
             f"理由={ex.reason} 損益={ex.pnl_pct * 100:+.1f}%"
@@ -355,6 +359,10 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
                 if _submit(broker, t, "SELL", qty, decision.price):
                     guard.record_trade(is_new_position=False)
             actions.append(msg)
+
+    # トレイリングストップ用の高値を保存（売却済みは除去）
+    if not dry_run:
+        _save_peaks(update_peaks(peaks, broker.positions(), prices))
 
     print("\n=== サイクル完了 ===")
     _print_account(broker, prices)
@@ -648,6 +656,31 @@ def _build_broker(cfg: Config, live: bool):
             exchange=cfg.trading.exchange,
         )
     return PaperBroker(cash=cfg.trading.cash)
+
+
+_PEAKS_PATH = "data/state/peaks.json"
+
+
+def _load_peaks() -> dict[str, float]:
+    import json
+    from pathlib import Path
+
+    p = Path(_PEAKS_PATH)
+    if not p.exists():
+        return {}
+    try:
+        return {k: float(v) for k, v in json.loads(p.read_text("utf-8")).items()}
+    except (ValueError, OSError):
+        return {}
+
+
+def _save_peaks(peaks: dict[str, float]) -> None:
+    import json
+    from pathlib import Path
+
+    p = Path(_PEAKS_PATH)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(peaks, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _submit(broker, ticker: str, side: str, qty: int, price: float | None) -> bool:

@@ -115,8 +115,11 @@ trading:
   cash: 1000000           # ペーパー口座の初期資金（円）
   max_positions: 5        # 同時保有銘柄数の上限
   position_pct: 0.2       # 1銘柄あたりの資金配分（口座の20%）
-  stop_loss_pct: 0.07     # 損切り（-7%）
-  take_profit_pct: 0.15   # 利確（+15%）
+  stop_loss_pct: 0.07     # 損切り（-7%）。0で無効
+  take_profit_pct: 0.15   # 利確（+15%）。0で無効（上昇を取り切るなら0に）
+  trailing_stop_pct: 0.0  # トレイリングストップ。>0で有効＝建値以降の高値から
+                          # この割合下落したら手仕舞い（例: 0.10＝高値-10%）。
+                          # 上昇トレンドを持ち続けたいときに有効。
   buy_score_threshold: 0.6   # 総合スコアがこれ以上で新規買い
   sell_score_threshold: -0.3 # 総合スコアがこれ以下で売り
 
