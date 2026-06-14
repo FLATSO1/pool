@@ -140,6 +140,7 @@ class TradingConfig:
     position_pct: float = 0.2
     stop_loss_pct: float = 0.07
     take_profit_pct: float = 0.15
+    trailing_stop_pct: float = 0.0   # >0で有効: 建値以降の高値から何%下落で手仕舞い
     buy_score_threshold: float = 0.6
     sell_score_threshold: float = -0.3
 
