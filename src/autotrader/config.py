@@ -139,6 +139,7 @@ class TradingConfig:
     max_positions: int = 5
     position_pct: float = 0.2
     stop_loss_pct: float = 0.07
+    stop_loss_atr_mult: float = 0.0  # >0で有効: 建値 − N×ATR を損切り線に（固定%より優先）
     take_profit_pct: float = 0.15
     trailing_stop_pct: float = 0.0   # >0で有効: 建値以降の高値から何%下落で手仕舞い
     buy_score_threshold: float = 0.6
