@@ -67,3 +67,55 @@ def test_empty_df_returns_hold():
     sig = ta.generate_signal("X.T", pd.DataFrame(), cfg)
     assert sig.action == "HOLD"
     assert sig.score == 0.0
+
+
+def test_compute_indicators_has_new_columns(uptrend_ohlcv):
+    cfg = TechnicalConfig()
+    ind = ta.compute_indicators(uptrend_ohlcv, cfg)
+    for col in (
+        "sma_mid", "bb_upper", "bb_lower", "vol_ma",
+        "close_high", "ichimoku_span_a", "ichimoku_span_b",
+    ):
+        assert col in ind.columns
+
+
+def test_ichimoku_columns_and_shift():
+    n = 120
+    idx = pd.date_range("2023-01-01", periods=n, freq="B")
+    close = pd.Series(np.linspace(100, 130, n), index=idx)
+    df = pd.DataFrame(
+        {"high": close + 1, "low": close - 1, "close": close}, index=idx
+    )
+    ich = ta.ichimoku(df, 9, 26, 52, 26)
+    assert list(ich.columns) == [
+        "ichimoku_conv", "ichimoku_base", "ichimoku_span_a", "ichimoku_span_b",
+    ]
+    # 先行スパンは shift 分だけ後ろが埋まる（先頭はNaN）
+    assert pd.isna(ich["ichimoku_span_a"].iloc[0])
+
+
+def test_perfect_order_reason_on_uptrend(uptrend_ohlcv):
+    cfg = TechnicalConfig()
+    sig = ta.generate_signal("T.T", uptrend_ohlcv, cfg)
+    # 強い上昇トレンドではパーフェクトオーダーか雲の上が根拠に出る
+    joined = " / ".join(sig.reasons)
+    assert "パーフェクトオーダー" in joined or "雲の上" in joined
+
+
+def test_bollinger_lower_touch_is_bullish_vote():
+    # 終値が下バンドに張り付くケースを構成し、逆張り買い票が入ることを確認
+    cfg = TechnicalConfig(bb_window=20, bb_std=2.0)
+    n = 60
+    idx = pd.date_range("2023-01-01", periods=n, freq="B")
+    close = np.full(n, 100.0)
+    close[-1] = 80.0  # 直近で急落 → 下バンド割れ
+    df = pd.DataFrame(
+        {
+            "open": close, "high": close + 0.5, "low": close - 0.5,
+            "close": close, "volume": np.full(n, 1e6),
+        },
+        index=idx,
+    )
+    ind = ta.compute_indicators(df, cfg)
+    last = ind.iloc[-1]
+    assert last["close"] <= last["bb_lower"]

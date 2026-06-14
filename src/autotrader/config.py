@@ -34,6 +34,7 @@ class FundamentalConfig:
 @dataclass
 class TechnicalConfig:
     sma_short: int = 25
+    sma_mid: int = 50
     sma_long: int = 75
     rsi_period: int = 14
     rsi_overbought: float = 70.0
@@ -42,6 +43,18 @@ class TechnicalConfig:
     macd_slow: int = 26
     macd_signal: int = 9
     atr_period: int = 14
+    # ボリンジャーバンド
+    bb_window: int = 20
+    bb_std: float = 2.0
+    # 出来高ブレイク
+    vol_ma_window: int = 20
+    vol_mult: float = 1.5
+    breakout_window: int = 20
+    # 一目均衡表
+    ichimoku_tenkan: int = 9
+    ichimoku_kijun: int = 26
+    ichimoku_senkou_b: int = 52
+    ichimoku_shift: int = 26
 
 
 @dataclass
