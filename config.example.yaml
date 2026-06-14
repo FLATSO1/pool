@@ -1,0 +1,127 @@
+# autotrader 設定ファイルのサンプル。
+# `cp config.example.yaml config.yaml` してから値を調整してください。
+
+# 監視ユニバースの供給方法:
+#   "manual" = 下の universe リストを使う
+#   "file"   = universe_file のCSV（code列）を読む（例: 日経225を全銘柄スキャン）
+universe_source: "file"
+universe_file: "data/universe/nikkei225.csv"
+
+# universe_source="manual" のときに使う手書きリスト（".T"サフィックス）
+universe:
+  - "7203.T"   # トヨタ自動車
+  - "6758.T"   # ソニーグループ
+  - "9984.T"   # ソフトバンクグループ
+  - "8306.T"   # 三菱UFJフィナンシャル・グループ
+  - "6861.T"   # キーエンス
+  - "9433.T"   # KDDI
+  - "4063.T"   # 信越化学工業
+  - "8035.T"   # 東京エレクトロン
+
+# ファンダメンタル選定の閾値（ここを通過した銘柄だけテクニカル/発注対象にする）
+fundamental:
+  min_score: 0.5          # 0.0–1.0。総合スコアの足切り
+  max_per: 30.0           # PER上限（割高すぎる銘柄を除外）
+  min_roe: 0.08           # ROE下限（8%）
+  max_debt_to_equity: 2.0 # D/E上限
+
+# テクニカル解析のパラメータ
+technical:
+  sma_short: 25
+  sma_mid: 50            # パーフェクトオーダー用の中期線
+  sma_long: 75
+  rsi_period: 14
+  rsi_overbought: 70
+  rsi_oversold: 30
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  atr_period: 14
+  # ボリンジャーバンド
+  bb_window: 20
+  bb_std: 2.0
+  # 出来高ブレイク（直近高値更新＋出来高>平均×倍率）
+  vol_ma_window: 20
+  vol_mult: 1.5
+  breakout_window: 20
+  # 一目均衡表
+  ichimoku_tenkan: 9
+  ichimoku_kijun: 26
+  ichimoku_senkou_b: 52
+  ichimoku_shift: 26
+  # ストキャスティクス
+  stoch_k: 14
+  stoch_d: 3
+  stoch_smooth: 3
+  stoch_oversold: 20
+  stoch_overbought: 80
+  # DMI / ADX（ADXが閾値超のときだけ方向に投票＝弱いトレンドの順張りを抑制）
+  adx_period: 14
+  adx_threshold: 25
+  # ダイバージェンス（価格とRSIの逆行）の参照期間
+  divergence_lookback: 14
+  # 各シグナルの重み（加重平均の係数。0で無効化）。
+  # `autotrader eval-signals` で有効なシグナルを調べ、ここで優先度を付ける。
+  # 未指定の項目は既定値が使われる（DEFAULT_WEIGHTS）。
+  weights:
+    trend: 1.0
+    cross: 0.5
+    macd: 0.5
+    rsi: 0.3
+    bb: 0.3
+    vol: 0.5
+    ichimoku_cloud: 0.7
+    ichimoku_triple: 0.6
+    perfect_order: 0.7
+    candlestick: 0.4
+    stoch: 0.3
+    adx: 0.5
+    divergence: 0.4
+
+# センチメント（ニュース/SNS）
+sentiment:
+  enabled: true
+  model: "claude-opus-4-8"
+  lookback_days: 7
+  max_headlines: 15
+  weight: 0.3             # 最終判断にセンチメントを反映する重み（0–1）
+
+# Claudeアドバイザー（提案レビュー＋地合いゲート）
+# propose コマンドで使う。決定論エンジンの候補をClaudeがレビューし、
+# 市場全体のニュースから地合いを判定して新規買いを調整する。
+advisor:
+  enabled: true
+  model: "claude-opus-4-8"
+  regime_enabled: true        # 地合い判定を使う
+  risk_off_block_buys: true   # 地合いrisk_off時に新規買いを見送る
+  skip_blocks_buy: true       # アドバイザーが skip 判断なら買い候補から外す
+
+# スマホ通知（売買・アラート・サマリ）。秘密情報は .env に設定。
+notify:
+  enabled: true
+  channel: "discord"   # "discord" | "telegram" | "console"
+
+# 完全自動運用の安全ガード（暴走防止）
+safety:
+  daily_loss_limit_pct: 0.03      # 当日-3%で新規買い停止
+  max_trades_per_day: 10          # 1日の最大約定数
+  max_new_positions_per_day: 3    # 1日の最大新規建て数
+  # 緊急停止: data/state/HALT というファイルを置くと新規買いが止まる
+
+# 売買・リスク管理
+trading:
+  mode: "paper"           # "paper" | "live"（liveは AUTOTRADER_ENABLE_LIVE=true も必須）
+  exchange: 1             # kabus: 1=東証
+  cash: 1000000           # ペーパー口座の初期資金（円）
+  max_positions: 5        # 同時保有銘柄数の上限
+  position_pct: 0.2       # 1銘柄あたりの資金配分（口座の20%）
+  stop_loss_pct: 0.07     # 損切り（-7%）
+  take_profit_pct: 0.15   # 利確（+15%）
+  buy_score_threshold: 0.6   # 総合スコアがこれ以上で新規買い
+  sell_score_threshold: -0.3 # 総合スコアがこれ以下で売り
+
+# バックテスト
+backtest:
+  start: "2022-01-01"
+  end: "2024-12-31"
+  commission_pct: 0.0005  # 売買手数料率（往復ではなく片道）
