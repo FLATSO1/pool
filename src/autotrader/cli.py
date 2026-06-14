@@ -32,7 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     p_an = sub.add_parser("analyze", help="1銘柄を解析")
     p_an.add_argument("ticker", help='例: "7203.T"')
 
-    sub.add_parser("backtest", help="過去データで戦略を検証")
+    p_bt = sub.add_parser("backtest", help="過去データで戦略を検証")
+    p_bt.add_argument("--start", help="開始日 YYYY-MM-DD（config上書き）")
+    p_bt.add_argument("--end", help="終了日 YYYY-MM-DD（config上書き）")
     sub.add_parser(
         "eval-signals", help="シグナル別にバックテストし有効性を比較"
     )
@@ -74,6 +76,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "analyze":
         return _cmd_analyze(cfg, args.ticker)
     if args.command == "backtest":
+        if getattr(args, "start", None):
+            cfg.backtest.start = args.start
+        if getattr(args, "end", None):
+            cfg.backtest.end = args.end
         return _cmd_backtest(cfg)
     if args.command == "eval-signals":
         return _cmd_eval_signals(cfg)
