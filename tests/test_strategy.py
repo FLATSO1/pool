@@ -71,3 +71,30 @@ def test_backtest_empty_input():
     cfg = _config_no_sentiment()
     result = Backtester(cfg).run({})
     assert result.final_equity == 0.0
+
+
+def test_weight_zero_disables_all_signals(uptrend_ohlcv):
+    from autotrader.analysis import technical as ta
+    from autotrader.config import DEFAULT_WEIGHTS, TechnicalConfig
+
+    cfg = TechnicalConfig()
+    cfg.weights = {k: 0.0 for k in DEFAULT_WEIGHTS}
+    ind = ta.compute_indicators(uptrend_ohlcv, cfg)
+    scores = ta.score_frame(ind, cfg)
+    # 全シグナル無効ならスコアは常に0
+    assert (scores == 0.0).all()
+
+
+def test_evaluate_signals_covers_every_signal(uptrend_ohlcv, downtrend_ohlcv):
+    from autotrader.backtest.signal_eval import evaluate_signals
+    from autotrader.config import DEFAULT_WEIGHTS
+
+    cfg = _config_no_sentiment()
+    cfg.trading.buy_score_threshold = 0.4
+    ohlcv = {"UP.T": uptrend_ohlcv, "DN.T": downtrend_ohlcv}
+    evals = evaluate_signals(cfg, ohlcv)
+    names = {e.name for e in evals}
+    # ベースライン＋各シグナル
+    assert any(n.startswith("ALL") for n in names)
+    for key in DEFAULT_WEIGHTS:
+        assert key in names

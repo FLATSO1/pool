@@ -96,6 +96,9 @@ autotrader analyze 7203.T
 # 3) 過去データでバックテスト
 autotrader backtest
 
+# 3b) シグナル別バックテスト（どのテクニカルが効くかを比較）
+autotrader eval-signals
+
 # 4) 1サイクル評価して発注（既定はペーパー）。判断だけ見るなら --dry-run
 autotrader run --dry-run
 autotrader run
@@ -160,6 +163,30 @@ python tools/build_universe.py 公式構成銘柄.csv -o data/universe/nikkei225
 - 株数: 口座評価額 × `position_pct` を 100株単位で配分
 
 しきい値・指標パラメータ・ユニバースはすべて `config.yaml` で調整できます。
+
+### シグナルの重み付けと有効性検証
+
+各テクニカルシグナルの重みは `config.yaml` の `technical.weights` で調整できます
+（`0` で無効化）。どのシグナルが効くかは **シグナル別バックテスト** で測れます:
+
+```bash
+autotrader eval-signals
+```
+
+各シグナルを単独で使ったときのリターン・最大DD・シャープ・勝率・売買回数を
+一覧表示します。出力例（合成データ）:
+
+```
+シグナル              リターン     最大DD   ｼｬｰﾌﾟ    勝率   回数
+ALL(既定重み)            69.4%     -8.2%    5.45    74%    57
+perfect_order           57.2%     -6.1%    5.18    89%    38
+trend                   55.7%     -6.4%    4.99    89%    39
+...
+divergence             -17.6%    -19.0%   -3.53     7%    29
+```
+
+→ 上位（効いた）シグナルを重く、下位を軽く/無効にして再検証、という
+ワークフローで戦略を磨けます。
 
 ## 今後の拡張案
 

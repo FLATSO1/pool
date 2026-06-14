@@ -31,6 +31,25 @@ class FundamentalConfig:
     max_debt_to_equity: float = 2.0
 
 
+# テクニカル各シグナルの既定の重み（加重平均の係数。0で無効化）。
+# config.yaml の technical.weights で個別に上書きできる。
+DEFAULT_WEIGHTS: dict[str, float] = {
+    "trend": 1.0,            # 短期SMA vs 長期SMA の位置
+    "cross": 0.5,           # ゴールデン/デッドクロス
+    "macd": 0.5,            # MACDヒストグラム
+    "rsi": 0.3,             # RSI 売られ/買われすぎ
+    "bb": 0.3,              # ボリンジャーバンド ±2σ
+    "vol": 0.5,             # 出来高ブレイク
+    "ichimoku_cloud": 0.7,  # 一目: 雲の上/下
+    "ichimoku_triple": 0.6, # 一目: 三役好転/逆転
+    "perfect_order": 0.7,   # パーフェクトオーダー
+    "candlestick": 0.4,     # ローソク足パターン
+    "stoch": 0.3,           # ストキャスティクス
+    "adx": 0.5,             # DMI/ADX
+    "divergence": 0.4,      # ダイバージェンス
+}
+
+
 @dataclass
 class TechnicalConfig:
     sma_short: int = 25
@@ -66,6 +85,8 @@ class TechnicalConfig:
     adx_threshold: float = 25.0
     # ダイバージェンス（価格とRSIの逆行）の参照期間
     divergence_lookback: int = 14
+    # 各シグナルの重み（DEFAULT_WEIGHTS を上書き）
+    weights: dict = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
 
 
 @dataclass
@@ -139,12 +160,18 @@ class Config:
             with open(candidate, "r", encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
 
+        technical = _build(TechnicalConfig, raw.get("technical"))
+        # 部分指定された重みは既定値にマージ（未指定キーは既定のまま）
+        merged = dict(DEFAULT_WEIGHTS)
+        merged.update(technical.weights or {})
+        technical.weights = merged
+
         return cls(
             universe=list(raw.get("universe", [])),
             universe_source=raw.get("universe_source", "manual"),
             universe_file=raw.get("universe_file", cls.universe_file),
             fundamental=_build(FundamentalConfig, raw.get("fundamental")),
-            technical=_build(TechnicalConfig, raw.get("technical")),
+            technical=technical,
             sentiment=_build(SentimentConfig, raw.get("sentiment")),
             trading=_build(TradingConfig, raw.get("trading")),
             backtest=_build(BacktestConfig, raw.get("backtest")),

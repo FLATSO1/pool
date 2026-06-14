@@ -60,6 +60,23 @@ technical:
   adx_threshold: 25
   # ダイバージェンス（価格とRSIの逆行）の参照期間
   divergence_lookback: 14
+  # 各シグナルの重み（加重平均の係数。0で無効化）。
+  # `autotrader eval-signals` で有効なシグナルを調べ、ここで優先度を付ける。
+  # 未指定の項目は既定値が使われる（DEFAULT_WEIGHTS）。
+  weights:
+    trend: 1.0
+    cross: 0.5
+    macd: 0.5
+    rsi: 0.3
+    bb: 0.3
+    vol: 0.5
+    ichimoku_cloud: 0.7
+    ichimoku_triple: 0.6
+    perfect_order: 0.7
+    candlestick: 0.4
+    stoch: 0.3
+    adx: 0.5
+    divergence: 0.4
 
 # センチメント（ニュース/SNS）
 sentiment:

@@ -33,6 +33,9 @@ def main(argv: list[str] | None = None) -> int:
     p_an.add_argument("ticker", help='例: "7203.T"')
 
     sub.add_parser("backtest", help="過去データで戦略を検証")
+    sub.add_parser(
+        "eval-signals", help="シグナル別にバックテストし有効性を比較"
+    )
 
     p_run = sub.add_parser("run", help="評価して発注（1サイクル）")
     p_run.add_argument(
@@ -57,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_analyze(cfg, args.ticker)
     if args.command == "backtest":
         return _cmd_backtest(cfg)
+    if args.command == "eval-signals":
+        return _cmd_eval_signals(cfg)
     if args.command == "run":
         return _cmd_run(cfg, dry_run=args.dry_run)
     if args.command == "account":
@@ -132,38 +137,83 @@ def _cmd_analyze(cfg: Config, ticker: str) -> int:
     return 0
 
 
-def _cmd_backtest(cfg: Config) -> int:
+def _load_backtest_data(cfg: Config):
+    """バックテスト用の価格データとファンダ通過銘柄を集める。"""
     from .analysis.fundamental import score_fundamentals
-    from .backtest.backtester import Backtester
     from .data.fundamentals import fetch_fundamentals
     from .data.market_data import fetch_ohlcv
     from .data.universe import load_universe
 
     universe = load_universe(cfg)
-    if not universe:
-        print("ユニバースが空です。")
-        return 1
-
-    print(
-        f"バックテスト {cfg.backtest.start} 〜 {cfg.backtest.end} "
-        f"（{len(universe)}銘柄）...\n"
-    )
     ohlcv: dict = {}
     passed: set[str] = set()
     for t in universe:
         df = fetch_ohlcv(t, start=cfg.backtest.start, end=cfg.backtest.end)
         if not df.empty:
             ohlcv[t] = df
-        # 現時点のファンダで足切り（簡易: 静的適用）
         if score_fundamentals(fetch_fundamentals(t), cfg.fundamental).passed:
             passed.add(t)
+    return universe, ohlcv, passed
 
+
+def _cmd_backtest(cfg: Config) -> int:
+    from .backtest.backtester import Backtester
+
+    universe, ohlcv, passed = _load_backtest_data(cfg)
+    if not universe:
+        print("ユニバースが空です。")
+        return 1
+    print(
+        f"バックテスト {cfg.backtest.start} 〜 {cfg.backtest.end} "
+        f"（{len(universe)}銘柄）...\n"
+    )
     if not ohlcv:
         print("価格データを取得できませんでした。")
         return 1
 
     result = Backtester(cfg).run(ohlcv, passed_tickers=passed or None)
     print(result.summary())
+    return 0
+
+
+def _cmd_eval_signals(cfg: Config) -> int:
+    from .backtest.signal_eval import evaluate_signals
+
+    universe, ohlcv, passed = _load_backtest_data(cfg)
+    if not universe:
+        print("ユニバースが空です。")
+        return 1
+    if not ohlcv:
+        print("価格データを取得できませんでした。")
+        return 1
+
+    print(
+        f"シグナル別バックテスト {cfg.backtest.start} 〜 {cfg.backtest.end} "
+        f"（{len(ohlcv)}銘柄）...\n"
+    )
+    evals = evaluate_signals(cfg, ohlcv, passed_tickers=passed or None)
+
+    # ALL以外をリターン降順で並べ、ALLは先頭に固定
+    baseline = [e for e in evals if e.name.startswith("ALL")]
+    singles = sorted(
+        [e for e in evals if not e.name.startswith("ALL")],
+        key=lambda e: e.total_return,
+        reverse=True,
+    )
+    ordered = baseline + singles
+
+    print(f"{'シグナル':<18}{'リターン':>10}{'最大DD':>10}{'ｼｬｰﾌﾟ':>8}{'勝率':>7}{'回数':>6}")
+    print("-" * 64)
+    for e in ordered:
+        r = e.result
+        print(
+            f"{e.name:<18}{r.total_return * 100:>9.1f}%"
+            f"{r.max_drawdown() * 100:>9.1f}%{r.sharpe():>8.2f}"
+            f"{e.win_rate() * 100:>6.0f}%{e.n_trades:>6}"
+        )
+    print("-" * 64)
+    print("※ リターン上位＝単独で効いたシグナル。config.yaml の technical.weights で")
+    print("  効くシグナルを重く、効かないものを軽く（0で無効化）して再検証できます。")
     return 0
 
 
