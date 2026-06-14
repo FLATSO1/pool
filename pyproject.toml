@@ -25,6 +25,10 @@ dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
 ]
+# 日本の祝日判定（営業日ゲート用。未導入でも土日・年末年始は判定される）
+jp = [
+    "jpholiday>=0.1",
+]
 
 [project.scripts]
 autotrader = "autotrader.cli:main"

@@ -55,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("account", help="ペーパー口座状態を表示")
     sub.add_parser("report", help="ポートフォリオ状況を通知（スケジュール実行向け）")
+    sub.add_parser(
+        "is-trading-day", help="東証の取引日か判定（取引日=終了コード0/非取引日=1）"
+    )
 
     p_kc = sub.add_parser(
         "kabus-check", help="kabuステーションAPIへの接続を確認（発注しない）"
@@ -87,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_account(cfg)
     if args.command == "report":
         return _cmd_report(cfg)
+    if args.command == "is-trading-day":
+        return _cmd_is_trading_day()
     if args.command == "kabus-check":
         return _cmd_kabus_check(cfg, args.ticker)
     return 1
@@ -551,6 +556,20 @@ def _cmd_account(cfg: Config) -> int:
     broker = PaperBroker(cash=cfg.trading.cash)
     _print_account(broker, {})
     return 0
+
+
+def _cmd_is_trading_day() -> int:
+    """東証の取引日なら0、非取引日なら1を返す（スケジューラのゲート用）。"""
+    import datetime as dt
+
+    from .market_calendar import describe_non_trading, is_trading_day
+
+    today = dt.date.today()
+    if is_trading_day(today):
+        print(f"{today} は取引日です")
+        return 0
+    print(f"{today} は非取引日（{describe_non_trading(today)}）")
+    return 1
 
 
 def _cmd_kabus_check(cfg: Config, ticker: str | None) -> int:
