@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     sub.add_parser("account", help="ペーパー口座状態を表示")
+    sub.add_parser("report", help="ポートフォリオ状況を通知（スケジュール実行向け）")
 
     p_kc = sub.add_parser(
         "kabus-check", help="kabuステーションAPIへの接続を確認（発注しない）"
@@ -84,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_execute(cfg, approve_all=args.yes, only=only)
     if args.command == "account":
         return _cmd_account(cfg)
+    if args.command == "report":
+        return _cmd_report(cfg)
     if args.command == "kabus-check":
         return _cmd_kabus_check(cfg, args.ticker)
     return 1
@@ -236,12 +239,13 @@ def _cmd_eval_signals(cfg: Config) -> int:
 
 
 def _cmd_run(cfg: Config, dry_run: bool) -> int:
-    from .broker.paper import PaperBroker
     from .data.fundamentals import fetch_fundamentals
     from .data.market_data import fetch_ohlcv, latest_price
     from .data.news import fetch_headlines
     from .data.universe import load_universe
+    from .notify import build_notifier
     from .portfolio import can_open_new, check_risk_exits
+    from .safety import SafetyGuard
     from .strategy.engine import StrategyEngine
 
     live = cfg.live_enabled()
@@ -252,8 +256,15 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
         )
 
     broker = _build_broker(cfg, live)
+    notifier = build_notifier(cfg)
+    guard = SafetyGuard(cfg.safety)
     label = "ライブ" if live else "ペーパー"
     print(f"=== 売買サイクル開始（{label}{' / DRY-RUN' if dry_run else ''}）===\n")
+
+    def notify(text: str) -> None:
+        print(text)
+        if not dry_run:
+            notifier.send(text)
 
     # 価格を集める
     ohlcv_map: dict = {}
@@ -267,24 +278,32 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
         if px is not None:
             prices[t] = px
 
-    # 1) リスク決済
-    exits = check_risk_exits(broker.positions(), prices, cfg.trading)
-    for ex in exits:
-        print(
-            f"[決済] {ex.ticker} {ex.quantity}株 理由={ex.reason} "
-            f"損益={ex.pnl_pct * 100:+.1f}%"
+    equity = broker.snapshot().equity(prices)
+    guard.begin_day(equity)
+    actions: list[str] = []
+
+    # 1) リスク決済（安全ガードに関係なく常に実行）
+    for ex in check_risk_exits(broker.positions(), prices, cfg.trading):
+        msg = (
+            f"💰決済 {ex.ticker} {ex.quantity}株 "
+            f"理由={ex.reason} 損益={ex.pnl_pct * 100:+.1f}%"
         )
+        notify(msg)
         if not dry_run:
-            _submit(broker, ex.ticker, "SELL", ex.quantity, prices.get(ex.ticker))
+            r = _submit(broker, ex.ticker, "SELL", ex.quantity, prices.get(ex.ticker))
+            if r:
+                guard.record_trade(is_new_position=False)
+        actions.append(msg)
 
     # 2) 新規/継続評価
+    blocked, reason = guard.new_buy_blocked(equity)
+    if blocked:
+        notify(f"⛔ 新規買い停止: {reason}")
+
     engine = StrategyEngine(cfg)
-    equity = broker.snapshot().equity(prices)
     for t in ohlcv_map:
         headlines = (
-            fetch_headlines(
-                t, cfg.sentiment.lookback_days, cfg.sentiment.max_headlines
-            )
+            fetch_headlines(t, cfg.sentiment.lookback_days, cfg.sentiment.max_headlines)
             if cfg.sentiment.enabled
             else []
         )
@@ -293,23 +312,86 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
         )
         if decision.action == "HOLD":
             continue
-        if decision.action == "BUY" and not can_open_new(broker.positions(), cfg.trading):
-            print(f"[スキップ] {t} 買いシグナルだが保有上限に到達")
-            continue
 
-        print(
-            f"[{decision.action}] {t} スコア={decision.combined_score:+.2f} "
-            f"数量={decision.quantity} 価格={decision.price}"
-        )
-        if not dry_run:
-            qty = decision.quantity if decision.action == "BUY" else _held_qty(
-                broker, t
+        if decision.action == "BUY":
+            if blocked:
+                continue
+            if not can_open_new(broker.positions(), cfg.trading):
+                print(f"[スキップ] {t} 買いシグナルだが保有上限に到達")
+                continue
+            # 1サイクル内でも上限を再チェック
+            again, why = guard.new_buy_blocked(equity)
+            if again:
+                notify(f"⛔ 新規買い停止: {why}")
+                blocked = True
+                continue
+            msg = (
+                f"🟢買い {t} {decision.quantity}株 @ {decision.price} "
+                f"スコア{decision.combined_score:+.2f}"
             )
-            if qty > 0:
-                _submit(broker, t, decision.action, qty, decision.price)
+            notify(msg)
+            if not dry_run and decision.quantity > 0:
+                if _submit(broker, t, "BUY", decision.quantity, decision.price):
+                    guard.record_trade(is_new_position=True)
+            actions.append(msg)
+        else:  # SELL
+            qty = _held_qty(broker, t)
+            if qty <= 0:
+                continue
+            msg = f"🔴売り {t} {qty}株 @ {decision.price} スコア{decision.combined_score:+.2f}"
+            notify(msg)
+            if not dry_run:
+                if _submit(broker, t, "SELL", qty, decision.price):
+                    guard.record_trade(is_new_position=False)
+            actions.append(msg)
 
     print("\n=== サイクル完了 ===")
     _print_account(broker, prices)
+
+    # サイクルにアクションがあればサマリ通知（無風の日は通知しない）
+    if actions and not dry_run:
+        final_equity = broker.snapshot().equity(prices)
+        day_pnl = final_equity - guard.state.start_equity
+        summary = (
+            f"📊 {label}サイクル完了: {len(actions)}件\n"
+            + "\n".join(actions)
+            + f"\n評価額 {final_equity:,.0f}円 / 当日損益 {day_pnl:+,.0f}円 "
+            + f"(取引{guard.state.trades}件)"
+        )
+        notifier.send(summary)
+    return 0
+
+
+def _cmd_report(cfg: Config) -> int:
+    """現在のポートフォリオ状態を通知（場の開始/引け後のスケジュール実行向け）。"""
+    from .data.market_data import fetch_ohlcv, latest_price
+    from .data.universe import load_universe
+    from .notify import build_notifier
+
+    broker = _build_broker(cfg, cfg.live_enabled())
+    notifier = build_notifier(cfg)
+    snap = broker.snapshot()
+
+    prices: dict[str, float] = {}
+    for t in list(snap.positions):
+        df = fetch_ohlcv(t, period="5d")
+        px = latest_price(df)
+        if px is not None:
+            prices[t] = px
+
+    lines = [f"📊 ポートフォリオ状況", f"現金: {snap.cash:,.0f}円"]
+    if snap.positions:
+        for t, pos in snap.positions.items():
+            px = prices.get(t)
+            pnl = f"{pos.unrealized_pnl(px):+,.0f}円" if px else "—"
+            lines.append(f"  {t}: {pos.quantity}株 @ {pos.avg_price:,.0f} (含み {pnl})")
+        lines.append(f"評価額合計: {snap.equity(prices):,.0f}円")
+    else:
+        lines.append("保有銘柄: なし")
+
+    text = "\n".join(lines)
+    print(text)
+    notifier.send(text)
     return 0
 
 
@@ -543,7 +625,7 @@ def _build_broker(cfg: Config, live: bool):
     return PaperBroker(cash=cfg.trading.cash)
 
 
-def _submit(broker, ticker: str, side: str, qty: int, price: float | None) -> None:
+def _submit(broker, ticker: str, side: str, qty: int, price: float | None) -> bool:
     from .broker.base import Order, Side
 
     result = broker.submit(
@@ -551,6 +633,7 @@ def _submit(broker, ticker: str, side: str, qty: int, price: float | None) -> No
     )
     status = "OK" if result.ok else "NG"
     print(f"    -> 発注{status}: {result.message}")
+    return result.ok
 
 
 def _held_qty(broker, ticker: str) -> int:

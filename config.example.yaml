@@ -96,6 +96,18 @@ advisor:
   risk_off_block_buys: true   # 地合いrisk_off時に新規買いを見送る
   skip_blocks_buy: true       # アドバイザーが skip 判断なら買い候補から外す
 
+# スマホ通知（売買・アラート・サマリ）。秘密情報は .env に設定。
+notify:
+  enabled: true
+  channel: "discord"   # "discord" | "telegram" | "console"
+
+# 完全自動運用の安全ガード（暴走防止）
+safety:
+  daily_loss_limit_pct: 0.03      # 当日-3%で新規買い停止
+  max_trades_per_day: 10          # 1日の最大約定数
+  max_new_positions_per_day: 3    # 1日の最大新規建て数
+  # 緊急停止: data/state/HALT というファイルを置くと新規買いが止まる
+
 # 売買・リスク管理
 trading:
   mode: "paper"           # "paper" | "live"（liveは AUTOTRADER_ENABLE_LIVE=true も必須）

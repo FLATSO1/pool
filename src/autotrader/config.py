@@ -99,6 +99,23 @@ class SentimentConfig:
 
 
 @dataclass
+class NotifyConfig:
+    """売買・アラート・サマリの通知設定（秘密情報は環境変数から）。"""
+
+    enabled: bool = True
+    channel: str = "discord"  # "discord" | "telegram" | "console"
+
+
+@dataclass
+class SafetyConfig:
+    """完全自動運用の安全ガード（暴走防止）。"""
+
+    daily_loss_limit_pct: float = 0.03      # 当日-3%で新規買い停止
+    max_trades_per_day: int = 10            # 1日の最大約定数
+    max_new_positions_per_day: int = 3      # 1日の最大新規建て数
+
+
+@dataclass
 class AdvisorConfig:
     """Claudeを「提案レビュー＋地合い判定」のアドバイザーとして使う設定。"""
 
@@ -137,6 +154,9 @@ class Secrets:
     kabus_api_password: str | None = None
     kabus_base_url: str = "http://localhost:18080/kabusapi"
     enable_live: bool = False
+    discord_webhook_url: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
 
     @classmethod
     def from_env(cls) -> "Secrets":
@@ -147,6 +167,9 @@ class Secrets:
             kabus_base_url=os.getenv("KABUS_BASE_URL", cls.kabus_base_url),
             enable_live=os.getenv("AUTOTRADER_ENABLE_LIVE", "false").lower()
             in ("1", "true", "yes"),
+            discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL"),
+            telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
+            telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
         )
 
 
@@ -159,6 +182,8 @@ class Config:
     technical: TechnicalConfig = field(default_factory=TechnicalConfig)
     sentiment: SentimentConfig = field(default_factory=SentimentConfig)
     advisor: AdvisorConfig = field(default_factory=AdvisorConfig)
+    notify: NotifyConfig = field(default_factory=NotifyConfig)
+    safety: SafetyConfig = field(default_factory=SafetyConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
     secrets: Secrets = field(default_factory=Secrets.from_env)
@@ -186,6 +211,8 @@ class Config:
             technical=technical,
             sentiment=_build(SentimentConfig, raw.get("sentiment")),
             advisor=_build(AdvisorConfig, raw.get("advisor")),
+            notify=_build(NotifyConfig, raw.get("notify")),
+            safety=_build(SafetyConfig, raw.get("safety")),
             trading=_build(TradingConfig, raw.get("trading")),
             backtest=_build(BacktestConfig, raw.get("backtest")),
             secrets=Secrets.from_env(),
