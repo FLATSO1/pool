@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import TechnicalConfig
+from . import candlestick
 
 
 # --- 指標 ---------------------------------------------------------------
@@ -150,6 +151,17 @@ def compute_indicators(df: pd.DataFrame, cfg: TechnicalConfig) -> pd.DataFrame:
         )
         for col in ich.columns:
             out[col] = ich[col]
+
+    # ローソク足パターン（始値・高安が必要）
+    if {"open", "high", "low"}.issubset(out.columns):
+        uptrend = out["sma_short"] > out["sma_long"]
+        downtrend = out["sma_short"] < out["sma_long"]
+        patterns = candlestick.detect(out, uptrend, downtrend)
+        agg = candlestick.aggregate(patterns)
+        for col in patterns.columns:
+            out[col] = patterns[col]
+        out["cdl_bull"] = agg["cdl_bull"]
+        out["cdl_bear"] = agg["cdl_bear"]
     return out
 
 
@@ -165,6 +177,7 @@ _W_VOL = 0.5          # 出来高急増を伴うブレイク
 _W_ICHI_CLOUD = 0.7   # 一目: 雲の上/下
 _W_ICHI_TRIPLE = 0.6  # 一目: 三役好転/逆転
 _W_PO = 0.7           # パーフェクトオーダー（移動平均3本の整列）
+_W_CDL = 0.4          # ローソク足パターン（短期・控えめな重み）
 
 
 def _weighted_components(
@@ -242,6 +255,12 @@ def _weighted_components(
             triple_down = below_cloud & (~tk_up) & (~chikou_up)
             add(triple_up, +1, _W_ICHI_TRIPLE)
             add(triple_down, -1, _W_ICHI_TRIPLE)
+
+    # ローソク足パターン（買い/売りの集約フラグ）
+    if "cdl_bull" in ind.columns:
+        add(ind["cdl_bull"], +1, _W_CDL)
+    if "cdl_bear" in ind.columns:
+        add(ind["cdl_bear"], -1, _W_CDL)
 
     return num, den
 
@@ -357,6 +376,11 @@ def _build_reasons(last, prev, cfg: TechnicalConfig) -> list[str]:
             reasons.append("一目: 雲の上（強気）")
         elif last["close"] < bot:
             reasons.append("一目: 雲の下（弱気）")
+
+    # ローソク足パターン（成立したものを名前で表示）
+    for col, label in {**candlestick.BULLISH_PATTERNS, **candlestick.BEARISH_PATTERNS}.items():
+        if bool(last.get(col, False)):
+            reasons.append(f"ローソク足: {label}")
     return reasons
 
 
