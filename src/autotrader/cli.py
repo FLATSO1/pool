@@ -79,6 +79,18 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true", help="既存CSVがあっても再取得する"
     )
 
+    p_tw = sub.add_parser(
+        "tune-weights", help="train/test分割で効くシグナルに重みを寄せる"
+    )
+    p_tw.add_argument("--split", help="train/test分割日 YYYY-MM-DD（省略時は7割地点）")
+    p_tw.add_argument(
+        "--fraction", type=float, default=0.7, help="分割日省略時のtrain比率（既定0.7）"
+    )
+    p_tw.add_argument(
+        "--metric", default="excess", choices=["excess", "sharpe", "return"],
+        help="最適化の目的（既定: excess=バイ&ホールド超過）",
+    )
+
     args = parser.parse_args(argv)
     cfg = Config.load(args.config)
     _configure_data_source(cfg)
@@ -118,6 +130,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_fetch_data(
             cfg, from_=args.from_, to=args.to, force=args.force
         )
+    if args.command == "tune-weights":
+        return _cmd_tune_weights(
+            cfg, split=args.split, fraction=args.fraction, metric=args.metric
+        )
     return 1
 
 
@@ -137,6 +153,54 @@ def _configure_data_source(cfg: Config) -> None:
         date_format=cfg.data.date_format,
     )
     configure_local_store(store, cfg.data.source)
+
+
+def _cmd_tune_weights(
+    cfg: Config, split: str | None, fraction: float, metric: str
+) -> int:
+    from .backtest.optimize import optimize_weights
+
+    universe, ohlcv, passed = _load_backtest_data(cfg)
+    if not ohlcv:
+        print("価格データを取得できませんでした。data.source/期間/取得状況を確認してください。")
+        return 1
+
+    try:
+        res = optimize_weights(
+            cfg, ohlcv, passed_tickers=passed or None,
+            split_date=split, fraction=fraction, metric=metric,
+        )
+    except ValueError as exc:
+        print(f"チューニング不可: {exc}")
+        return 1
+
+    def _row(label: str, r) -> str:
+        return (
+            f"  {label:<16} リターン{r.total_return * 100:+7.2f}%  "
+            f"超過{r.excess_return() * 100:+7.2f}%  "
+            f"DD{r.max_drawdown() * 100:6.2f}%  "
+            f"ｼｬｰﾌﾟ{r.sharpe():5.2f}  約定{len(r.trades)}"
+        )
+
+    print(f"=== 重みチューニング（metric={metric}）===")
+    print(f"分割日: {res.split_date.date()}（未満=TRAIN / 以降=TEST・{len(ohlcv)}銘柄）\n")
+    print("[TRAIN / in-sample]")
+    print(_row("既定重み", res.train_baseline))
+    print(_row("チューニング後", res.train_tuned))
+    print("\n[TEST / out-of-sample] ← ここが本番の評価")
+    print(_row("既定重み", res.test_baseline))
+    print(_row("チューニング後", res.test_tuned))
+
+    improved = res.test_tuned.excess_return() > res.test_baseline.excess_return()
+    verdict = (
+        "✅ アウトオブサンプルで既定重みを上回った → 採用候補"
+        if improved
+        else "⚠️ アウトオブサンプルで改善せず（過学習の疑い。採用は慎重に）"
+    )
+    print(f"\n{verdict}\n")
+    print("--- config.yaml に貼れる提案重み ---")
+    print(res.weights_yaml())
+    return 0
 
 
 def _cmd_fetch_data(
