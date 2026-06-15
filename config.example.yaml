@@ -7,6 +7,21 @@
 universe_source: "file"
 universe_file: "data/universe/nikkei225.csv"
 
+# 株価データの供給元。証券会社ツールで書き出した「上場来」日足CSVを使うと
+# yfinanceのレート制限・期間制限・銘柄欠損に縛られずバックテストの土台が厚くなる。
+#   source: "yfinance"(従来) | "local"(ローカルCSVのみ) | "auto"(ローカル→無ければyfinance)
+#   local_dir: 1銘柄1ファイルでCSVを置くディレクトリ（例 data/history/7203.csv）
+#   filename_template: ファイル名の形（{code}=証券コード）
+#   columns: ヘッダが特殊な場合だけ 正準名->実ヘッダ を上書き（通常は日本語/英語自動判定）
+# `autotrader data` で各銘柄の整備状況（行数・期間）を確認できる。
+data:
+  source: "yfinance"
+  local_dir: "data/history"
+  filename_template: "{code}.csv"
+  # date_format: "%Y/%m/%d"
+  # columns:
+  #   close: "調整後終値"
+
 # universe_source="manual" のときに使う手書きリスト（".T"サフィックス）
 universe:
   - "7203.T"   # トヨタ自動車

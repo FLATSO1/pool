@@ -12,6 +12,17 @@ from ..logging_setup import get_logger
 
 log = get_logger(__name__)
 
+# ローカルCSVをデータソースにする場合に CLI 起動時へ設定される。
+_LOCAL_STORE = None       # LocalStore | None
+_LOCAL_SOURCE = "yfinance"  # "yfinance" | "local" | "auto"
+
+
+def configure_local_store(store, source: str = "auto") -> None:
+    """ローカルヒストリカルCSVを株価ソースとして登録する。"""
+    global _LOCAL_STORE, _LOCAL_SOURCE
+    _LOCAL_STORE = store
+    _LOCAL_SOURCE = source
+
 
 def fetch_ohlcv(
     ticker: str,
@@ -24,7 +35,20 @@ def fetch_ohlcv(
 
     返り値のカラム: open, high, low, close, volume（小文字に正規化）。
     index は日時。
+
+    ローカルCSVソースが設定されている場合、日足はまずローカルから読む
+    （source="local" は失敗時に空、"auto" は yfinance にフォールバック）。
+    分足など 1d 以外はローカル対象外で常に yfinance を使う。
     """
+    if _LOCAL_STORE is not None and interval == "1d" and _LOCAL_SOURCE in ("local", "auto"):
+        df = _LOCAL_STORE.load(ticker, period=period, start=start, end=end)
+        if not df.empty:
+            return df
+        if _LOCAL_SOURCE == "local":
+            log.warning("ローカルにデータがありません: %s", ticker)
+            return pd.DataFrame()
+        # "auto": yfinance にフォールバック
+
     try:
         import yfinance as yf
     except ImportError as exc:  # pragma: no cover - 環境依存
