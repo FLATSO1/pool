@@ -192,10 +192,28 @@ class Secrets:
 
 
 @dataclass
+class DataConfig:
+    """株価データの供給元。
+
+    source:
+      "yfinance" … 従来どおりyfinanceから取得
+      "local"    … ローカルCSV（証券会社書き出し等）のみを使う
+      "auto"     … まずローカルCSV、無ければyfinanceにフォールバック
+    """
+
+    source: str = "yfinance"
+    local_dir: str = "data/history"
+    filename_template: str = "{code}.csv"
+    date_format: str | None = None
+    columns: dict = field(default_factory=dict)  # 正準名->実ヘッダ の上書き
+
+
+@dataclass
 class Config:
     universe: list[str] = field(default_factory=list)
     universe_source: str = "manual"  # "manual"(下のリスト) | "file"(CSVを読む)
     universe_file: str = "data/universe/nikkei225.csv"
+    data: DataConfig = field(default_factory=DataConfig)
     fundamental: FundamentalConfig = field(default_factory=FundamentalConfig)
     technical: TechnicalConfig = field(default_factory=TechnicalConfig)
     sentiment: SentimentConfig = field(default_factory=SentimentConfig)
@@ -225,6 +243,7 @@ class Config:
             universe=list(raw.get("universe", [])),
             universe_source=raw.get("universe_source", "manual"),
             universe_file=raw.get("universe_file", cls.universe_file),
+            data=_build(DataConfig, raw.get("data")),
             fundamental=_build(FundamentalConfig, raw.get("fundamental")),
             technical=technical,
             sentiment=_build(SentimentConfig, raw.get("sentiment")),

@@ -68,8 +68,11 @@ def main(argv: list[str] | None = None) -> int:
         "ticker", nargs="?", help='現在値を取得する銘柄（省略時はユニバース先頭）'
     )
 
+    sub.add_parser("data", help="ローカルヒストリカルCSVの整備状況を表示")
+
     args = parser.parse_args(argv)
     cfg = Config.load(args.config)
+    _configure_data_source(cfg)
 
     if args.command == "screen":
         return _cmd_screen(cfg)
@@ -100,10 +103,53 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_is_trading_day()
     if args.command == "kabus-check":
         return _cmd_kabus_check(cfg, args.ticker)
+    if args.command == "data":
+        return _cmd_data(cfg)
     return 1
 
 
 # --- サブコマンド実装 ----------------------------------------------------
+
+def _configure_data_source(cfg: Config) -> None:
+    """設定に応じてローカルCSVを株価ソースとして登録する。"""
+    if cfg.data.source not in ("local", "auto"):
+        return
+    from .data.local_store import LocalStore
+    from .data.market_data import configure_local_store
+
+    store = LocalStore(
+        cfg.data.local_dir,
+        filename_template=cfg.data.filename_template,
+        columns=cfg.data.columns,
+        date_format=cfg.data.date_format,
+    )
+    configure_local_store(store, cfg.data.source)
+
+
+def _cmd_data(cfg: Config) -> int:
+    from .data.local_store import LocalStore
+    from .data.universe import load_universe
+
+    store = LocalStore(
+        cfg.data.local_dir,
+        filename_template=cfg.data.filename_template,
+        columns=cfg.data.columns,
+        date_format=cfg.data.date_format,
+    )
+    universe = load_universe(cfg)
+    print(f"=== ローカルデータ整備状況 ({cfg.data.local_dir}) ===")
+    print(f"source={cfg.data.source} / 対象{len(universe)}銘柄\n")
+    have = 0
+    for t in universe:
+        cov = store.coverage(t)
+        if cov:
+            have += 1
+            rows, d0, d1 = cov
+            print(f"  ✅ {t}: {rows}行 {d0}〜{d1}")
+        else:
+            print(f"  ❌ {t}: データなし")
+    print(f"\n{have}/{len(universe)} 銘柄が利用可能")
+    return 0
 
 def _cmd_screen(cfg: Config) -> int:
     from .analysis.fundamental import score_fundamentals
