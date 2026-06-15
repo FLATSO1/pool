@@ -70,6 +70,15 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("data", help="ローカルヒストリカルCSVの整備状況を表示")
 
+    p_fd = sub.add_parser(
+        "fetch-data", help="J-Quants APIから日足を取得しローカルCSVへ保存"
+    )
+    p_fd.add_argument("--from", dest="from_", help="取得開始日 YYYY-MM-DD")
+    p_fd.add_argument("--to", dest="to", help="取得終了日 YYYY-MM-DD")
+    p_fd.add_argument(
+        "--force", action="store_true", help="既存CSVがあっても再取得する"
+    )
+
     args = parser.parse_args(argv)
     cfg = Config.load(args.config)
     _configure_data_source(cfg)
@@ -105,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_kabus_check(cfg, args.ticker)
     if args.command == "data":
         return _cmd_data(cfg)
+    if args.command == "fetch-data":
+        return _cmd_fetch_data(
+            cfg, from_=args.from_, to=args.to, force=args.force
+        )
     return 1
 
 
@@ -124,6 +137,48 @@ def _configure_data_source(cfg: Config) -> None:
         date_format=cfg.data.date_format,
     )
     configure_local_store(store, cfg.data.source)
+
+
+def _cmd_fetch_data(
+    cfg: Config, from_: str | None, to: str | None, force: bool
+) -> int:
+    from .data.jquants import JQuantsClient, JQuantsError
+    from .data.local_store import LocalStore
+    from .data.universe import load_universe
+
+    s = cfg.secrets
+    if not (s.jquants_refresh_token or (s.jquants_mailaddress and s.jquants_password)):
+        print(
+            "J-Quantsの認証情報が未設定です。.env に JQUANTS_REFRESH_TOKEN "
+            "（または JQUANTS_MAILADDRESS / JQUANTS_PASSWORD）を設定してください。"
+        )
+        return 1
+
+    client = JQuantsClient(
+        refresh_token=s.jquants_refresh_token,
+        mailaddress=s.jquants_mailaddress,
+        password=s.jquants_password,
+    )
+    store = LocalStore(cfg.data.local_dir, filename_template=cfg.data.filename_template)
+    universe = load_universe(cfg)
+    print(f"=== J-Quantsから取得 → {cfg.data.local_dir} ({len(universe)}銘柄) ===")
+    ok = skipped = failed = 0
+    for t in universe:
+        if not force and store.available(t):
+            skipped += 1
+            continue
+        try:
+            n = client.save_csv(t, cfg.data.local_dir, from_=from_, to=to)
+            print(f"  ✅ {t}: {n}行")
+            ok += 1
+        except (JQuantsError, OSError) as exc:
+            print(f"  ❌ {t}: {exc}")
+            failed += 1
+        except Exception as exc:  # noqa: BLE001 - ネットワーク等は継続
+            print(f"  ❌ {t}: {exc}")
+            failed += 1
+    print(f"\n取得{ok} / スキップ{skipped} / 失敗{failed}")
+    return 0 if failed == 0 else 1
 
 
 def _cmd_data(cfg: Config) -> int:
