@@ -175,6 +175,9 @@ class Secrets:
     discord_webhook_url: str | None = None
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    jquants_refresh_token: str | None = None
+    jquants_mailaddress: str | None = None
+    jquants_password: str | None = None
 
     @classmethod
     def from_env(cls) -> "Secrets":
@@ -188,6 +191,9 @@ class Secrets:
             discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL"),
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
+            jquants_refresh_token=os.getenv("JQUANTS_REFRESH_TOKEN"),
+            jquants_mailaddress=os.getenv("JQUANTS_MAILADDRESS"),
+            jquants_password=os.getenv("JQUANTS_PASSWORD"),
         )
 
 
