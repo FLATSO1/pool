@@ -628,6 +628,7 @@ def _cmd_propose(cfg: Config) -> int:
     from .analysis.market_regime import assess_market
     from .data.fundamentals import fetch_fundamentals
     from .data.market_data import fetch_ohlcv, latest_price
+    from .analysis.correlation import too_correlated
     from .data.news import fetch_headlines
     from .data.universe import load_universe
     from .portfolio import can_open_new, check_risk_exits
@@ -692,6 +693,20 @@ def _cmd_propose(cfg: Config) -> int:
         if d.action == "BUY":
             if block_buys or not can_open_new(broker.positions(), cfg.trading):
                 continue
+            # 相関分散: 既保有とよく似た値動きの銘柄は見送る
+            if cfg.trading.max_correlation > 0:
+                held_closes = {
+                    p: ohlcv_map[p]["close"]
+                    for p in broker.positions()
+                    if p in ohlcv_map
+                }
+                skip, corr, who = too_correlated(
+                    df["close"], held_closes,
+                    cfg.trading.correlation_lookback, cfg.trading.max_correlation,
+                )
+                if skip:
+                    print(f"[見送り] {t} 既保有 {who} と相関{corr:.2f}（高すぎ）")
+                    continue
             # 発注直前の需給チェック（ライブ時のみ・板/1分足）
             pressure_str, buy_ratio = "", None
             if live and cfg.entry_filter.enabled:

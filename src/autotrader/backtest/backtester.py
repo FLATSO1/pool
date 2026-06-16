@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from ..analysis.correlation import too_correlated
 from ..analysis.technical import compute_indicators, score_frame
 from ..broker.base import Position
 from ..config import Config
@@ -200,6 +201,17 @@ class Backtester:
                     and len(positions) < t_cfg.max_positions
                     and (passed_tickers is None or t in passed_tickers)
                 ):
+                    # 相関分散: 既保有とよく似た値動きなら見送る
+                    if t_cfg.max_correlation > 0 and positions:
+                        held = {
+                            p: closes[p].loc[:date] for p in positions if p in closes
+                        }
+                        skip, _, _ = too_correlated(
+                            closes[t].loc[:date], held,
+                            t_cfg.correlation_lookback, t_cfg.max_correlation,
+                        )
+                        if skip:
+                            continue
                     equity = cash + sum(
                         positions[p].quantity * prices.get(p, positions[p].avg_price)
                         for p in positions
