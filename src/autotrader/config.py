@@ -155,6 +155,10 @@ class TradingConfig:
     trailing_stop_pct: float = 0.0   # >0で有効: 建値以降の高値から何%下落で手仕舞い
     buy_score_threshold: float = 0.6
     sell_score_threshold: float = -0.3
+    # 相関分散: 既保有銘柄とのリターン相関がこの値を超える新規買いを見送る。
+    # 0以下で無効。例 0.8 = よく似た値動きの銘柄を重ねて持たない（1業種総崩れ対策）。
+    max_correlation: float = 0.0
+    correlation_lookback: int = 60   # 相関を測る日数（営業日）
 
 
 @dataclass
