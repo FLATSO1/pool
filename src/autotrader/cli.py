@@ -19,7 +19,25 @@ from .logging_setup import get_logger, setup_logging
 log = get_logger(__name__)
 
 
+def _force_utf8_streams() -> None:
+    """標準出力/標準エラーをUTF-8で出す。
+
+    Windowsの既定コンソールはcp932のため、絵文字（🟢🔴💰等）を含む通知を
+    print するとUnicodeEncodeErrorで落ち、日本語ログも文字化けする。
+    UTF-8へ再構成し、万一エンコードできない文字があっても落ちないよう
+    errors="replace" を付ける。reconfigure 非対応環境では何もしない。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_streams()
     setup_logging()
     parser = argparse.ArgumentParser(
         prog="autotrader", description="日本株 自動売買アプリ"
