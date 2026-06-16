@@ -57,6 +57,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("account", help="ペーパー口座状態を表示")
     sub.add_parser("report", help="ポートフォリオ状況を通知（スケジュール実行向け）")
+    p_nt = sub.add_parser(
+        "notify-test", help="通知チャネル（Discord/Telegram）へテスト送信して疎通確認"
+    )
+    p_nt.add_argument("message", nargs="?", help="送るテストメッセージ（省略時は既定文）")
     sub.add_parser(
         "is-trading-day", help="東証の取引日か判定（取引日=終了コード0/非取引日=1）"
     )
@@ -120,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_account(cfg)
     if args.command == "report":
         return _cmd_report(cfg)
+    if args.command == "notify-test":
+        return _cmd_notify_test(cfg, args.message)
     if args.command == "is-trading-day":
         return _cmd_is_trading_day()
     if args.command == "kabus-check":
@@ -579,6 +585,40 @@ def _cmd_report(cfg: Config) -> int:
     text = "\n".join(lines)
     print(text)
     notifier.send(text)
+    return 0
+
+
+def _cmd_notify_test(cfg: Config, message: str | None) -> int:
+    from datetime import datetime
+
+    from .notify import ConsoleNotifier, build_notifier
+
+    notifier = build_notifier(cfg)
+    kind = type(notifier).__name__
+    if isinstance(notifier, ConsoleNotifier):
+        if not cfg.notify.enabled:
+            print("⚠️ notify.enabled=false です。config.yaml で有効化してください。")
+        else:
+            print(
+                f"⚠️ channel={cfg.notify.channel} の認証情報が未設定のため、"
+                "コンソール出力にフォールバックしています。"
+            )
+            if cfg.notify.channel == "discord":
+                print("   → .env の DISCORD_WEBHOOK_URL を確認してください。")
+            elif cfg.notify.channel == "telegram":
+                print("   → .env の TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID を確認してください。")
+
+    text = message or (
+        f"✅ autotrader 通知テスト（{datetime.now():%Y-%m-%d %H:%M}）— "
+        "これが届けば連携OKです。"
+    )
+    ok = notifier.send(text)
+    if ok and not isinstance(notifier, ConsoleNotifier):
+        print(f"✅ {kind} へ送信しました。{cfg.notify.channel} を確認してください。")
+        return 0
+    if not ok:
+        print(f"❌ {kind} 送信に失敗しました。URL/トークンとネットワークを確認してください。")
+        return 1
     return 0
 
 
