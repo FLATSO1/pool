@@ -76,6 +76,10 @@ def test_daily_state_resets_next_day(tmp_path):
 def test_build_notifier_falls_back_to_console():
     cfg = Config()
     cfg.notify = NotifyConfig(enabled=True, channel="discord")
+    # ローカルの .env に左右されないよう、認証情報を明示的に未設定にする
+    cfg.secrets.discord_webhook_url = None
+    cfg.secrets.telegram_bot_token = None
+    cfg.secrets.telegram_chat_id = None
     # Webhook未設定 → コンソールにフォールバック
     assert isinstance(build_notifier(cfg), ConsoleNotifier)
 
