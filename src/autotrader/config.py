@@ -146,6 +146,15 @@ class EntryFilterConfig:
 class TradingConfig:
     mode: str = "paper"  # "paper" | "live"
     exchange: int = 1
+    # 取引区分: "cash"=現物 / "margin"=信用。信用でも下の max_leverage で
+    # レバレッジを縛れる（既定1.0=建玉≤余力。追証リスクを実質ゼロにする）。
+    trade_type: str = "cash"           # "cash" | "margin"
+    # 信用の種別（trade_type="margin" のとき）: "system"=制度 / "general"=一般(長期)
+    # / "day"=一般(デイトレ・日計り)。kabuステーションの MarginTradeType に対応。
+    margin_trade_type: str = "day"     # "system" | "general" | "day"
+    # 建玉合計の上限（評価額に対する倍率）。1.0=建玉≤余力（レバ1倍）。
+    # 0以下でガード無効。新規買いがこの上限を超える場合は見送る。
+    max_leverage: float = 1.0
     cash: float = 1_000_000.0
     max_positions: int = 5
     position_pct: float = 0.2

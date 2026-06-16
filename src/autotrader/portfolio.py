@@ -82,3 +82,36 @@ def update_peaks(
 def can_open_new(positions: dict[str, Position], cfg: TradingConfig) -> bool:
     """新規ポジションを開ける余地があるか（同時保有数の上限）。"""
     return len(positions) < cfg.max_positions
+
+
+def total_exposure(
+    positions: dict[str, Position], prices: dict[str, float]
+) -> float:
+    """保有建玉の時価合計（株数×現在値。現在値が無ければ建値で代用）。"""
+    total = 0.0
+    for ticker, pos in positions.items():
+        px = prices.get(ticker)
+        total += pos.quantity * (px if px is not None else pos.avg_price)
+    return total
+
+
+def within_leverage(
+    new_cost: float,
+    positions: dict[str, Position],
+    prices: dict[str, float],
+    equity: float,
+    cfg: TradingConfig,
+) -> bool:
+    """新規建て（コスト=new_cost）が許容レバレッジ内に収まるか。
+
+    「建玉合計（新規を含む） ≤ 評価額 × max_leverage」を満たすとき True。
+    max_leverage<=0 ならガード無効で常に True。
+
+    例: max_leverage=1.0 なら、建玉の時価合計が口座評価額を超える新規買いを
+    ブロックする（＝レバレッジ1倍上限。信用でも追証リスクを実質ゼロに保つ）。
+    """
+    if cfg.max_leverage <= 0:
+        return True
+    projected = total_exposure(positions, prices) + max(0.0, new_cost)
+    # 浮動小数の誤差を吸収する微小マージン
+    return projected <= equity * cfg.max_leverage + 1e-6

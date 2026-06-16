@@ -426,7 +426,12 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
     from .data.news import fetch_headlines
     from .data.universe import load_universe
     from .notify import build_notifier
-    from .portfolio import can_open_new, check_risk_exits, update_peaks
+    from .portfolio import (
+        can_open_new,
+        check_risk_exits,
+        update_peaks,
+        within_leverage,
+    )
     from .safety import SafetyGuard
     from .strategy.engine import StrategyEngine
 
@@ -507,6 +512,16 @@ def _cmd_run(cfg: Config, dry_run: bool) -> int:
                 continue
             if not can_open_new(broker.positions(), cfg.trading):
                 print(f"[スキップ] {t} 買いシグナルだが保有上限に到達")
+                continue
+            # レバレッジ上限（建玉合計 ≤ 余力×max_leverage）を超える買いは見送る
+            new_cost = decision.quantity * (decision.price or 0.0)
+            if not within_leverage(
+                new_cost, broker.positions(), prices, equity, cfg.trading
+            ):
+                print(
+                    f"[スキップ] {t} 買いシグナルだがレバレッジ上限"
+                    f"（×{cfg.trading.max_leverage}）に到達"
+                )
                 continue
             # 1サイクル内でも上限を再チェック
             again, why = guard.new_buy_blocked(equity)
@@ -631,7 +646,7 @@ def _cmd_propose(cfg: Config) -> int:
     from .analysis.correlation import too_correlated
     from .data.news import fetch_headlines
     from .data.universe import load_universe
-    from .portfolio import can_open_new, check_risk_exits
+    from .portfolio import can_open_new, check_risk_exits, within_leverage
     from .strategy.engine import StrategyEngine
     from .strategy.proposal import Proposal, save_proposals
 
@@ -692,6 +707,15 @@ def _cmd_propose(cfg: Config) -> int:
             continue
         if d.action == "BUY":
             if block_buys or not can_open_new(broker.positions(), cfg.trading):
+                continue
+            # レバレッジ上限（建玉合計 ≤ 余力×max_leverage）を超える買いは見送る
+            new_cost = d.quantity * (d.price or 0.0)
+            if not within_leverage(
+                new_cost, broker.positions(), prices, equity, cfg.trading
+            ):
+                print(
+                    f"[見送り] {t} レバレッジ上限（×{cfg.trading.max_leverage}）に到達"
+                )
                 continue
             # 相関分散: 既保有とよく似た値動きの銘柄は見送る
             if cfg.trading.max_correlation > 0:
@@ -832,12 +856,21 @@ def _cmd_kabus_check(cfg: Config, ticker: str | None) -> int:
         print("✗ KABUS_API_PASSWORD が未設定です。.env を確認してください。")
         return 1
 
-    print(f"kabuステーションAPI 接続チェック: {cfg.secrets.kabus_base_url}\n")
+    print(f"kabuステーションAPI 接続チェック: {cfg.secrets.kabus_base_url}")
+    if cfg.trading.trade_type == "margin":
+        print(
+            f"取引区分: 信用（{cfg.trading.margin_trade_type}） / "
+            f"レバレッジ上限 ×{cfg.trading.max_leverage}\n"
+        )
+    else:
+        print("取引区分: 現物\n")
     broker = KabusBroker(
         api_password=pw,
         base_url=cfg.secrets.kabus_base_url,
         trade_password=os.getenv("KABUS_TRADE_PASSWORD"),
         exchange=cfg.trading.exchange,
+        trade_type=cfg.trading.trade_type,
+        margin_trade_type=cfg.trading.margin_trade_type,
     )
 
     # 1) 認証
@@ -889,6 +922,8 @@ def _build_broker(cfg: Config, live: bool):
             base_url=cfg.secrets.kabus_base_url,
             trade_password=os.getenv("KABUS_TRADE_PASSWORD"),
             exchange=cfg.trading.exchange,
+            trade_type=cfg.trading.trade_type,
+            margin_trade_type=cfg.trading.margin_trade_type,
         )
     return PaperBroker(cash=cfg.trading.cash)
 

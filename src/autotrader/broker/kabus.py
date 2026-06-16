@@ -18,6 +18,10 @@ from .base import AccountSnapshot, Broker, Order, OrderResult, Position, Side
 
 log = get_logger(__name__)
 
+# 信用種別（trade_type="margin"）→ kabuステーション MarginTradeType コード
+# 1=制度信用, 2=一般信用(長期), 3=一般信用(デイトレ/日計り)
+_MARGIN_TYPE_CODE: dict[str, int] = {"system": 1, "general": 2, "day": 3}
+
 
 class KabusBroker(Broker):
     def __init__(
@@ -27,6 +31,8 @@ class KabusBroker(Broker):
         trade_password: str | None = None,
         exchange: int = 1,            # 1=東証
         account_type: int = 4,        # 4=特定
+        trade_type: str = "cash",     # "cash"=現物 / "margin"=信用
+        margin_trade_type: str = "day",  # "system" | "general" | "day"
         timeout: float = 10.0,
     ):
         if not api_password:
@@ -36,6 +42,8 @@ class KabusBroker(Broker):
         self._trade_password = trade_password
         self._exchange = exchange
         self._account_type = account_type
+        self._trade_type = trade_type
+        self._margin_trade_type = margin_trade_type
         self._timeout = timeout
         self._token: str | None = None
 
@@ -87,30 +95,55 @@ class KabusBroker(Broker):
 
     # --- Broker インターフェース ---
 
-    def submit(self, order: Order) -> OrderResult:
-        if not self._trade_password:
-            return OrderResult(
-                False, message="取引パスワード(KABUS_TRADE_PASSWORD)が未設定です"
-            )
+    def _build_order_payload(self, order: Order) -> dict:
+        """/sendorder に渡す注文ペイロードを構築する（ネットワーク非依存・テスト可能）。
+
+        - 現物（trade_type="cash"）: CashMargin=1。買=お預り金(DelivType2)、売=0。
+        - 信用（trade_type="margin"）: 買=新規建て(CashMargin2,DelivType0)、
+          売=返済(CashMargin3,DelivType2)。MarginTradeType は margin_trade_type で決定。
+          このアプリは買って→売って決済する建玉のみ扱うため、売り=返済とみなす。
+        """
         side_code = "2" if order.side == Side.BUY else "1"  # 1=売, 2=買
         front_order_type = 10 if order.limit_price is None else 20  # 10=成行,20=指値
         price = 0 if order.limit_price is None else float(order.limit_price)
-        deliv_type = 2 if order.side == Side.BUY else 0  # 買: お預り金, 売: 0
 
-        payload = {
+        payload: dict = {
             "Password": self._trade_password,
             "Symbol": self._symbol(order.ticker),
             "Exchange": self._exchange,
             "SecurityType": 1,            # 株式
             "Side": side_code,
-            "CashMargin": 1,              # 現物
-            "DelivType": deliv_type,
             "AccountType": self._account_type,
             "Qty": order.quantity,
             "FrontOrderType": front_order_type,
             "Price": price,
             "ExpireDay": 0,               # 当日
         }
+
+        if self._trade_type == "margin":
+            payload["MarginTradeType"] = _MARGIN_TYPE_CODE.get(
+                self._margin_trade_type, 3
+            )
+            if order.side == Side.BUY:          # 新規建て
+                payload["CashMargin"] = 2
+                payload["DelivType"] = 0
+            else:                                # 返済
+                payload["CashMargin"] = 3
+                payload["DelivType"] = 2
+                payload["FundType"] = "  "       # 信用は半角スペース2文字
+                payload["ClosePositionOrder"] = 0  # 建日の古い順から返済
+        else:                                    # 現物
+            payload["CashMargin"] = 1
+            payload["DelivType"] = 2 if order.side == Side.BUY else 0
+
+        return payload
+
+    def submit(self, order: Order) -> OrderResult:
+        if not self._trade_password:
+            return OrderResult(
+                False, message="取引パスワード(KABUS_TRADE_PASSWORD)が未設定です"
+            )
+        payload = self._build_order_payload(order)
         try:
             data = self._request("POST", "/sendorder", json=payload)
         except requests.RequestException as exc:
@@ -137,8 +170,10 @@ class KabusBroker(Broker):
         return data.get("CurrentPrice") if data else None
 
     def positions(self) -> dict[str, Position]:
+        # product: 1=現物 / 2=信用。取引区分に合わせて建玉を取得する。
+        product = 2 if self._trade_type == "margin" else 1
         try:
-            data = self._request("GET", "/positions", params={"product": 1})
+            data = self._request("GET", "/positions", params={"product": product})
         except requests.RequestException as exc:
             log.warning("ポジション取得失敗: %s", exc)
             return {}

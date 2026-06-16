@@ -17,6 +17,7 @@ from ..analysis.technical import compute_indicators, score_frame
 from ..broker.base import Position
 from ..config import Config
 from ..logging_setup import get_logger
+from ..portfolio import within_leverage
 from ..strategy.engine import LOT_SIZE
 
 log = get_logger(__name__)
@@ -219,7 +220,9 @@ class Backtester:
                     budget = equity * t_cfg.position_pct
                     qty = int(budget // (px * LOT_SIZE)) * LOT_SIZE
                     cost = px * qty * (1 + commission)
-                    if qty > 0 and cost <= cash:
+                    # レバレッジ上限（建玉合計 ≤ 評価額×max_leverage）を超えない範囲で建てる
+                    lev_ok = within_leverage(px * qty, positions, prices, equity, t_cfg)
+                    if qty > 0 and cost <= cash and lev_ok:
                         cash -= cost
                         positions[t] = Position(t, qty, px)
                         peaks[t] = px

@@ -136,6 +136,10 @@ safety:
 trading:
   mode: "paper"           # "paper" | "live"（liveは AUTOTRADER_ENABLE_LIVE=true も必須）
   exchange: 1             # kabus: 1=東証
+  trade_type: "cash"      # "cash"=現物 / "margin"=信用
+  margin_trade_type: "day"  # 信用種別: "system"=制度 / "general"=一般(長期) / "day"=一般(デイトレ)
+  max_leverage: 1.0       # 建玉合計の上限＝評価額×この倍率。1.0=建玉≤余力（レバ1倍）。
+                          # 信用でも追証リスクを実質ゼロに保つ安全弁。0以下でガード無効。
   cash: 1000000           # ペーパー口座の初期資金（円）
   max_positions: 5        # 同時保有銘柄数の上限
   position_pct: 0.2       # 1銘柄あたりの資金配分（口座の20%）
