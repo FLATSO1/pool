@@ -40,6 +40,16 @@ fundamental:
   min_roe: 0.08           # ROE下限（8%）
   max_debt_to_equity: 2.0 # D/E上限
 
+# ②直近の強さ（モメンタム/トレンド）フィルタ
+# ファンダ通過後、実際に上昇基調にある銘柄だけを新規買い対象に絞る。
+# 「質の良い銘柄（ファンダ）→ 実際に強い銘柄（強さ）→ タイミング（テクニカル）」の2段目。
+strength:
+  enabled: true           # false で従来どおり（強さフィルタ無し）
+  lookback_days: 60       # 直近リターンを測る営業日数（約3か月）
+  min_recent_return: 0.0  # この期間のリターン下限（0=プラス必須。0.05で+5%以上に厳格化）
+  require_above_ma: true  # 株価が長期移動平均より上（上昇基調）であることを要求
+  ma_period: 75           # 上記MAの期間（営業日）
+
 # テクニカル解析のパラメータ
 technical:
   sma_short: 25

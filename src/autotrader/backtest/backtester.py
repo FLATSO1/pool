@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from ..analysis.correlation import too_correlated
+from ..analysis.strength import strength_frame
 from ..analysis.technical import compute_indicators, score_frame
 from ..broker.base import Position
 from ..config import Config
@@ -108,12 +109,15 @@ class Backtester:
         scores: dict[str, pd.Series] = {}
         closes: dict[str, pd.Series] = {}
         atrs: dict[str, pd.Series] = {}
+        strengths: dict[str, pd.Series] = {}  # 「直近の強さ」通過フラグ（バー毎）
         for t, df in ohlcv.items():
             ind = compute_indicators(df, self.cfg.technical)
             scores[t] = score_frame(ind, self.cfg.technical)
             closes[t] = df["close"]
             if "atr" in ind.columns:
                 atrs[t] = ind["atr"]
+            if self.cfg.strength.enabled:
+                strengths[t] = strength_frame(df, self.cfg.strength)
 
         # 共通の日付インデックス（全銘柄の和集合）
         index = sorted(set().union(*[df.index for df in ohlcv.values()]))
@@ -202,6 +206,11 @@ class Backtester:
                     and len(positions) < t_cfg.max_positions
                     and (passed_tickers is None or t in passed_tickers)
                 ):
+                    # ②直近の強さゲート: 上昇基調にある銘柄のみ新規買い
+                    if self.cfg.strength.enabled and t in strengths:
+                        ss = strengths[t]
+                        if date not in ss.index or not bool(ss.loc[date]):
+                            continue
                     # 相関分散: 既保有とよく似た値動きなら見送る
                     if t_cfg.max_correlation > 0 and positions:
                         held = {

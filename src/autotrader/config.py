@@ -95,6 +95,22 @@ class TechnicalConfig:
 
 
 @dataclass
+class StrengthConfig:
+    """直近の強さ（モメンタム/トレンド）フィルタ。
+
+    ファンダ足切りを通過した銘柄のうち、実際に上昇基調にあるものだけを
+    新規買いの対象にする「②直近の強さ」ゲート。質の良い銘柄でも下落基調なら
+    買わない（＝強い銘柄に絞ってからテクニカルでタイミングを計る）。
+    """
+
+    enabled: bool = True
+    lookback_days: int = 60        # 直近リターンを測る営業日数（約3か月）
+    min_recent_return: float = 0.0 # この期間リターンの下限（0=プラス必須）
+    require_above_ma: bool = True  # 株価が長期移動平均より上であること（上昇基調）
+    ma_period: int = 75            # 上記MAの期間（営業日）
+
+
+@dataclass
 class SentimentConfig:
     enabled: bool = True
     model: str = "claude-opus-4-8"
@@ -234,6 +250,7 @@ class Config:
     universe_file: str = "data/universe/nikkei225.csv"
     data: DataConfig = field(default_factory=DataConfig)
     fundamental: FundamentalConfig = field(default_factory=FundamentalConfig)
+    strength: StrengthConfig = field(default_factory=StrengthConfig)
     technical: TechnicalConfig = field(default_factory=TechnicalConfig)
     sentiment: SentimentConfig = field(default_factory=SentimentConfig)
     advisor: AdvisorConfig = field(default_factory=AdvisorConfig)
@@ -264,6 +281,7 @@ class Config:
             universe_file=raw.get("universe_file", cls.universe_file),
             data=_build(DataConfig, raw.get("data")),
             fundamental=_build(FundamentalConfig, raw.get("fundamental")),
+            strength=_build(StrengthConfig, raw.get("strength")),
             technical=technical,
             sentiment=_build(SentimentConfig, raw.get("sentiment")),
             advisor=_build(AdvisorConfig, raw.get("advisor")),

@@ -16,6 +16,7 @@ import pandas as pd
 
 from ..analysis.fundamental import FundamentalScore, score_fundamentals
 from ..analysis.sentiment import SentimentResult, analyze_sentiment
+from ..analysis.strength import StrengthScore, assess_strength
 from ..analysis.technical import TechnicalSignal, generate_signal
 from ..config import Config
 from ..data.fundamentals import Fundamentals
@@ -32,6 +33,7 @@ class Decision:
     price: float | None
     quantity: int               # 推奨発注株数（BUY時）
     fundamental: FundamentalScore | None
+    strength: StrengthScore | None
     technical: TechnicalSignal | None
     sentiment: SentimentResult | None
     reasons: list[str]
@@ -63,7 +65,20 @@ class StrategyEngine:
                 f"{'通過' if fund.passed else '不通過'}"
             )
 
-        # 2) テクニカル
+        # 2) 直近の強さ（モメンタム/トレンド）フィルタ
+        strength = assess_strength(ticker, ohlcv, self.cfg.strength)
+        if self.cfg.strength.enabled:
+            reasons.append(
+                f"強さ: {'通過' if strength.passed else '不通過'}"
+                + (
+                    f"（直近{self.cfg.strength.lookback_days}日"
+                    f"{strength.recent_return * 100:+.1f}%）"
+                    if strength.recent_return is not None
+                    else ""
+                )
+            )
+
+        # 3) テクニカル
         tech = generate_signal(ticker, ohlcv, self.cfg.technical)
         reasons.append(f"テクニカル: スコア{tech.score:+.2f} ({tech.action})")
 
@@ -89,7 +104,7 @@ class StrategyEngine:
 
         # 5) アクション決定
         price = tech.indicators.get("close")
-        action = self._decide_action(combined, fund)
+        action = self._decide_action(combined, fund, strength)
         qty = 0
         if action == "BUY" and price:
             qty = self._position_size(equity, price)
@@ -104,6 +119,7 @@ class StrategyEngine:
             price=price,
             quantity=qty,
             fundamental=fund,
+            strength=strength,
             technical=tech,
             sentiment=sent,
             reasons=reasons,
@@ -112,15 +128,20 @@ class StrategyEngine:
     # --- 内部 ---
 
     def _decide_action(
-        self, combined: float, fund: FundamentalScore | None
+        self,
+        combined: float,
+        fund: FundamentalScore | None,
+        strength: StrengthScore | None,
     ) -> str:
         t = self.cfg.trading
-        # 売りシグナルはファンダに関わらず有効（保有銘柄の利確/損切り含む）
+        # 売りシグナルはファンダ/強さに関わらず有効（保有銘柄の利確/損切り含む）
         if combined <= t.sell_score_threshold:
             return "SELL"
-        # 新規買いはファンダ足切りを通過している場合のみ
+        # 新規買いは「①ファンダ足切り通過」かつ「②直近の強さ通過」のときのみ
         if combined >= t.buy_score_threshold:
-            if fund is None or fund.passed:
+            fund_ok = fund is None or fund.passed
+            strength_ok = strength is None or strength.passed
+            if fund_ok and strength_ok:
                 return "BUY"
         return "HOLD"
 
