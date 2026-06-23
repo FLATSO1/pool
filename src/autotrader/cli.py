@@ -73,6 +73,15 @@ def main(argv: list[str] | None = None) -> int:
         "--only", help="この銘柄だけ対象（カンマ区切り。例: 7203.T,6758.T）"
     )
 
+    p_rev = sub.add_parser(
+        "review",
+        help="Claude Codeレビュー用に候補を書き出す／記入済み意見を取り込む（API不要）",
+    )
+    p_rev.add_argument(
+        "--apply", action="store_true",
+        help="記入済み review.json を proposals.json に取り込む",
+    )
+
     sub.add_parser("account", help="ペーパー口座状態を表示")
     sub.add_parser("report", help="ポートフォリオ状況を通知（スケジュール実行向け）")
     p_nt = sub.add_parser(
@@ -138,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
             {t.strip() for t in args.only.split(",")} if args.only else None
         )
         return _cmd_execute(cfg, approve_all=args.yes, only=only)
+    if args.command == "review":
+        return _cmd_review(cfg, apply=args.apply)
     if args.command == "account":
         return _cmd_account(cfg)
     if args.command == "report":
@@ -823,6 +834,20 @@ def _cmd_execute(cfg: Config, approve_all: bool, only: set | None) -> int:
         if only and p.ticker not in only:
             continue
         _print_proposal(p)
+        adv = p.advisor or {}
+        # アドバイザーが skip と判断した買いは、設定により自動見送り。
+        if (
+            p.action == "BUY"
+            and cfg.advisor.skip_blocks_buy
+            and adv.get("recommendation") == "skip"
+        ):
+            print("    → 見送り（アドバイザーが skip と判断）")
+            continue
+        # Claude Code のレビュー未取り込み（pending）の買いは注意喚起。
+        if p.action == "BUY" and adv.get("source") == "claude-code-pending":
+            print(
+                "    ⚠ 未レビュー（`autotrader review` でレビューを取り込めます）"
+            )
         if approve_all:
             approved = True
         else:
@@ -838,6 +863,40 @@ def _cmd_execute(cfg: Config, approve_all: bool, only: set | None) -> int:
             print("    → 見送り")
 
     print(f"\n発注した提案: {executed}件")
+    return 0
+
+
+def _cmd_review(cfg: Config, apply: bool) -> int:
+    """Claude Codeレビューの書き出し／取り込み（API不要）。"""
+    from .strategy.review import REVIEW_PATH, apply_review, export_review
+
+    if apply:
+        try:
+            applied, warnings = apply_review()
+        except FileNotFoundError as e:
+            print(str(e))
+            return 1
+        for w in warnings:
+            print(f"⚠ {w}")
+        print(f"レビューを取り込みました: {applied}件")
+        if applied:
+            print("`autotrader execute` で承認・発注してください。")
+        return 0
+
+    try:
+        path, n = export_review()
+    except FileNotFoundError as e:
+        print(str(e))
+        return 1
+    if n == 0:
+        print("レビュー対象の買い候補がありません。")
+        return 0
+    print(f"レビュー候補 {n}件を書き出しました: {path}")
+    print(
+        "Claude Code に「このレビューを記入して」と頼むか、"
+        f"{REVIEW_PATH} の各 opinion を埋めてください。"
+    )
+    print("記入後 `autotrader review --apply` で取り込みます。")
     return 0
 
 

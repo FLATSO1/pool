@@ -141,6 +141,13 @@ class AdvisorConfig:
     """Claudeを「提案レビュー＋地合い判定」のアドバイザーとして使う設定。"""
 
     enabled: bool = True
+    # レビューの供給元:
+    #   "auto"        … APIキーがあればClaude API、無ければ機械判定（従来動作）
+    #   "fallback"    … 常に機械判定（APIを呼ばない）
+    #   "claude-code" … APIを呼ばず「Claude Codeのレビュー待ち」にする。
+    #                   `autotrader review` で候補を書き出し→Claude Codeが意見を記入
+    #                   →`autotrader review --apply` で取り込む（API課金ゼロ）。
+    mode: str = "auto"
     model: str = "claude-opus-4-8"
     regime_enabled: bool = True          # 地合いゲートを使うか
     risk_off_block_buys: bool = True     # 地合いrisk_off時に新規買いを止める

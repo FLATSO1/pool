@@ -63,8 +63,12 @@ def review_candidate(
     api_key: str | None,
 ) -> AdvisorOpinion:
     """1つの売買候補をレビューして意見を返す。"""
-    if not cfg.enabled:
+    if not cfg.enabled or cfg.mode == "fallback":
         return _fallback(ticker, combined_score)
+    if cfg.mode == "claude-code":
+        # APIを呼ばず、Claude Codeのレビュー待ちにする。
+        # `autotrader review --apply` で本意見に差し替えられる。
+        return _pending(ticker)
 
     titles = "\n".join(f"- {h.title}" for h in headlines[:10]) or "（ニュースなし）"
     prompt = (
@@ -96,6 +100,18 @@ def review_candidate(
         )
     except (KeyError, ValueError, TypeError):
         return _fallback(ticker, combined_score)
+
+
+def _pending(ticker: str) -> AdvisorOpinion:
+    """Claude Codeのレビュー待ち（API未使用）。caution扱いで発注は止めない。"""
+    return AdvisorOpinion(
+        ticker=ticker,
+        recommendation="caution",
+        confidence=0.0,
+        rationale="Claude Codeのレビュー待ち（`autotrader review` で意見を記入）",
+        risks=[],
+        source="claude-code-pending",
+    )
 
 
 def _fallback(ticker: str, combined_score: float) -> AdvisorOpinion:
